@@ -562,7 +562,7 @@ def _run_pre_epoch_scan(
     )
     print(Fore.GREEN + Style.BRIGHT + "─" * 110 + Style.RESET_ALL)
 
-    trade = simulate_entry(best)
+    trade = simulate_entry(best, event_ts_ms)
 
     # ── Wait for funding epoch + exit window ──────────────────────────────────
     wait_to_exit = max(0.0, (event_ts_ms + EXIT_WAIT_SECONDS * 1000 - time.time() * 1000) / 1000)

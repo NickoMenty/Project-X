@@ -83,10 +83,12 @@ class SimulatedTrade:
 
 # ── Core operations ───────────────────────────────────────────────────────────
 
-def simulate_entry(opportunity: SpikeOpportunity) -> SimulatedTrade:
+def simulate_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> SimulatedTrade:
     """
     Record entry at current mark prices (simulated fill at T-10s).
     Funding rates are locked in from the pre-scan snapshot.
+    event_ts_ms is the confirmed joint funding epoch timestamp from the scheduler
+    (used instead of opportunity.next_funding_ts which may have already rolled over).
     """
     return SimulatedTrade(
         symbol=opportunity.symbol,
@@ -97,7 +99,7 @@ def simulate_entry(opportunity: SpikeOpportunity) -> SimulatedTrade:
         short_rate_pct=opportunity.short_rate_pct,
         long_fee_pct=opportunity.long_fee_pct,
         short_fee_pct=opportunity.short_fee_pct,
-        funding_ts_ms=opportunity.next_funding_ts,
+        funding_ts_ms=event_ts_ms,
         entry_ts=time.time(),
         entry_long_price=opportunity.long_price,
         entry_short_price=opportunity.short_price,
@@ -178,15 +180,17 @@ def print_trade_report(trade: SimulatedTrade) -> None:
     # ── Funding event ─────────────────────────────────────────────────────────
     epoch_str = _ts(trade.funding_ts_ms / 1000)
     print(f"\n  FUNDING EPOCH  [{epoch_str}]")
-    coll_color = Fore.GREEN if trade.funding_collected_usd >= 0 else Fore.RED
-    paid_color  = Fore.RED   if trade.funding_paid_usd      <= 0 else Fore.GREEN
+    coll_color   = Fore.GREEN if trade.funding_collected_usd >= 0 else Fore.RED
+    paid_color   = Fore.RED   if trade.funding_paid_usd      <= 0 else Fore.GREEN
+    short_label  = "collected" if trade.short_rate_pct >= 0 else "paid"
+    long_label   = "paid"      if trade.long_rate_pct  >= 0 else "collected"
     print(
         f"    Short  {trade.short_exchange:<14}  rate: {trade.short_rate_pct:+.4f}%  "
-        f"→  {coll_color}{Style.BRIGHT}${trade.funding_collected_usd:+.4f}{Style.RESET_ALL}  (collected)"
+        f"→  {coll_color}{Style.BRIGHT}${trade.funding_collected_usd:+.4f}{Style.RESET_ALL}  ({short_label})"
     )
     print(
         f"    Long   {trade.long_exchange:<14}  rate: {trade.long_rate_pct:+.4f}%  "
-        f"→  {paid_color}{Style.BRIGHT}${trade.funding_paid_usd:+.4f}{Style.RESET_ALL}  (paid)"
+        f"→  {paid_color}{Style.BRIGHT}${trade.funding_paid_usd:+.4f}{Style.RESET_ALL}  ({long_label})"
     )
     print(f"    {'Net funding':38}  {_pnl_color(trade.net_funding_usd)}")
 

@@ -1,0 +1,19 @@
+# Funding Rate Arbitrage Bot — Requirements
+# Python 3.9+ required
+# Install: pip install -r requirements.txt
+
+# HTTP requests to exchange APIs
+requests>=2.31.0
+
+# Terminal color output (cross-platform: Windows, Mac, Linux)
+colorama>=0.4.6
+
+# Clean terminal table formatting
+tabulate>=0.9.0
+
+# .env file loading for API keys (used from Milestone 4 onwards)
+python-dotenv>=1.0.0
+
+# Everything else used in this project (dataclasses, statistics, pathlib,
+# concurrent.futures, typing, json, csv, datetime, itertools, threading)
+# is Python standard library — no extra installs needed.

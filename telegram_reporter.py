@@ -29,34 +29,35 @@ from typing import List
 
 load_dotenv()
 
-_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
-_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID",   "")
-_API_URL = "https://api.telegram.org/bot{token}/sendMessage"
+_TOKEN    = os.getenv("TELEGRAM_BOT_TOKEN", "")
+_CHAT_IDS = [cid.strip() for cid in os.getenv("TELEGRAM_CHAT_ID", "").split(",") if cid.strip()]
+_API_URL  = "https://api.telegram.org/bot{token}/sendMessage"
 
 # Telegram message length limit
 _MAX_LEN = 4096
 
 
 def _configured() -> bool:
-    return bool(_TOKEN and _CHAT_ID)
+    return bool(_TOKEN and _CHAT_IDS)
 
 
 def _send(text: str) -> None:
-    """POST a message to Telegram. Silently swallows errors."""
+    """POST a message to all configured Telegram chat IDs. Silently swallows errors."""
     if not _configured():
         return
-    try:
-        requests.post(
-            _API_URL.format(token=_TOKEN),
-            json={
-                "chat_id":    _CHAT_ID,
-                "text":       text[:_MAX_LEN],
-                "parse_mode": "HTML",
-            },
-            timeout=10,
-        )
-    except Exception:
-        pass  # never crash the main loop over a Telegram failure
+    for chat_id in _CHAT_IDS:
+        try:
+            requests.post(
+                _API_URL.format(token=_TOKEN),
+                json={
+                    "chat_id":    chat_id,
+                    "text":       text[:_MAX_LEN],
+                    "parse_mode": "HTML",
+                },
+                timeout=10,
+            )
+        except Exception:
+            pass  # never crash the main loop over a Telegram failure
 
 
 def send_trade_report(trade: SimulatedTrade) -> None:

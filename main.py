@@ -276,8 +276,8 @@ def display_spike_opportunities(
                 time_str = Fore.YELLOW + "?" + Style.RESET_ALL
             elif secs < 60:
                 time_str = Fore.RED + Style.BRIGHT + f"{secs:.0f}s" + Style.RESET_ALL
-            elif secs < 600:
-                time_str = Fore.YELLOW + f"{secs/60:.0f}m {secs%60:.0f}s" + Style.RESET_ALL
+            elif secs < 3600:
+                time_str = Fore.YELLOW + f"{int(secs//60)}m {int(secs%60)}s" + Style.RESET_ALL
             else:
                 time_str = f"{secs/3600:.1f}h"
 

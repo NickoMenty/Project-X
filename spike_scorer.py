@@ -193,36 +193,65 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     short_fee = _fee(short_ex)
     total_fee = long_fee * 2.0 + short_fee * 2.0
 
-    # ── Filter 1: Primary (short) exchange must be imminent ───────────────────
-    # The hedge (long) exchange does NOT need to align — it only contributes
-    # bonus funding if it happens to credit at the same time.
+    # ── Advance timestamps past now ───────────────────────────────────────────
+    ts_short: Optional[int] = None
+    ts_long:  Optional[int] = None
+    if short_next is not None:
+        ts_short = int(short_next)
+        while ts_short < now_ms: ts_short += step_short
+    if long_next is not None:
+        ts_long = int(long_next)
+        while ts_long < now_ms: ts_long += step_long
+
+    # ── Per-leg net funding (positive = we receive) ───────────────────────────
+    # Short leg receives when rate > 0; pays when rate < 0.
+    # Long  leg receives when rate < 0; pays when rate > 0.
+    net_short_receive = short_rate   # >0 = receive, <0 = pay
+    net_long_receive  = -long_rate   # >0 = receive (when long_rate<0), <0 = pay
+
+    # ── Filter 1: At least one receiving leg must be imminent ─────────────────
+    # The PRIMARY is the leg we're RECEIVING from at its upcoming epoch.
+    # The OTHER leg is the hedge (delta neutral) — it may or may not also credit.
     alignment_ts: int = 0
     secs_to: float = float("inf")
     hedge_credits: bool = False
 
-    if short_next is None:
-        fail_reasons.append(f"{short_ex} missing next_funding_ts for this pair")
+    short_profitable = net_short_receive > 0 and ts_short is not None
+    long_profitable  = net_long_receive  > 0 and ts_long  is not None
+
+    if not short_profitable and not long_profitable:
+        fail_reasons.append(
+            f"no receiving leg: short_rate={short_rate:+.4f}% "
+            f"long_rate={long_rate:+.4f}% (both legs pay at imminent epoch)"
+        )
+        alignment_ts = ts_short or ts_long or 0
+        secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0) if alignment_ts else float("inf")
     else:
-        ts_short = int(short_next)
-        while ts_short < now_ms:
-            ts_short += step_short
-        alignment_ts = ts_short
+        # Pick the soonest profitable leg as the trigger epoch.
+        # If only one is profitable, that's the primary.
+        # If both are profitable, pick the earlier one.
+        candidates = []
+        if short_profitable: candidates.append(ts_short)
+        if long_profitable:  candidates.append(ts_long)
+        alignment_ts = min(candidates)
         secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
 
-        # Check if hedge also credits near the same time (bonus — not required)
-        if long_next is not None:
-            ts_long = int(long_next)
-            while ts_long < now_ms:
-                ts_long += step_long
-            if abs(ts_long - ts_short) <= ALIGNMENT_TOLERANCE_SECONDS * 1000:
+        # Check if the OTHER leg also credits near the same time
+        tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
+        if ts_short is not None and ts_long is not None:
+            if abs(ts_short - ts_long) <= tol_ms:
                 hedge_credits = True
 
     # ── Gross funding capture ─────────────────────────────────────────────────
-    # Primary (short) always contributes short_rate_pct.
-    # Hedge contributes only if it credits at the same epoch.
-    gross_pct = short_rate
+    # Sum receiving contributions from both legs if both credit at the epoch.
+    # If only one leg credits, only count that leg's contribution.
     if hedge_credits:
-        gross_pct -= long_rate  # long_rate > 0 → we pay; long_rate < 0 → we receive
+        # Both credit — sum net receives from both legs
+        gross_pct = net_short_receive + net_long_receive
+    elif ts_short == alignment_ts or (ts_short is not None and abs(ts_short - alignment_ts) <= ALIGNMENT_TOLERANCE_SECONDS * 1000):
+        gross_pct = net_short_receive
+    else:
+        gross_pct = net_long_receive
 
     score = gross_pct - total_fee
 

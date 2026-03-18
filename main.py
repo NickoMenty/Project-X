@@ -277,6 +277,12 @@ def display_spike_opportunities(
                 return Fore.YELLOW + f"{int(secs//60)}m {int(secs%60)}s" + Style.RESET_ALL
             return f"{secs/3600:.1f}h"
 
+        def _live_secs(ts_ms: int) -> float:
+            """Recompute seconds-to-funding from an already-advanced timestamp."""
+            if not ts_ms:
+                return float("inf")
+            return max(0.0, (ts_ms - time.time() * 1000) / 1000)
+
         # Determine which timestamp belongs to long/short exchange
         def _long_short_ts(opp: "SpikeOpportunity"):
             # next_funding_ts = primary (trigger) exchange
@@ -311,7 +317,7 @@ def display_spike_opportunities(
                 f"{opp.price_spread_pct:.3f}%",
                 _fmt_ts(long_ts),
                 _fmt_ts(short_ts),
-                _fmt_countdown(opp.seconds_to_funding),
+                _fmt_countdown(_live_secs(opp.next_funding_ts)),
                 Fore.GREEN + f"${opp.estimated_profit_usd:.4f}" + Style.RESET_ALL,
             ])
 

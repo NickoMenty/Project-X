@@ -77,6 +77,28 @@ def fetch_all(exchanges: Optional[List[str]] = None) -> List[FundingData]:
     return results
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _advance_ts(ts_ms: Optional[int], interval_hours: float) -> Optional[int]:
+    """
+    Advance a (potentially stale) next_funding_ts forward by interval until it
+    is in the future. Mirrors the same logic used in spike_scorer.py.
+    """
+    if not ts_ms:
+        return None
+    now_ms = time.time() * 1000
+    step_ms = int(interval_hours * 3_600_000)
+    while ts_ms < now_ms:
+        ts_ms += step_ms
+    return ts_ms
+
+
+def _seconds_to(ts_ms: Optional[int]) -> Optional[float]:
+    if ts_ms is None:
+        return None
+    return max(0.0, (ts_ms - time.time() * 1000) / 1000)
+
+
 # ── Formatting helpers ────────────────────────────────────────────────────────
 
 def _fmt_price(price: float) -> str:
@@ -143,10 +165,15 @@ def display(
     if min_rate > 0:
         filtered = [r for r in filtered if abs(r.funding_rate_pct) >= min_rate]
 
+    # ── Advance stale timestamps once so all display values are consistent ───────
+    advanced: Dict[int, Optional[int]] = {
+        id(r): _advance_ts(r.next_funding_ts, r.interval_hours) for r in filtered
+    }
+
     # ── Sort ───────────────────────────────────────────────────────────────────
     if sort_by == "time":
         filtered.sort(key=lambda r: (
-            r.seconds_to_next_funding if r.seconds_to_next_funding is not None else float("inf")
+            _seconds_to(advanced[id(r)]) if advanced[id(r)] is not None else float("inf")
         ))
     elif sort_by == "symbol":
         filtered.sort(key=lambda r: (r.symbol, r.exchange))
@@ -173,14 +200,15 @@ def display(
     # ── Build rows ─────────────────────────────────────────────────────────────
     rows = []
     for r in filtered:
+        ts = advanced[id(r)]
         rows.append([
             Style.BRIGHT + r.exchange + Style.RESET_ALL,
             Style.BRIGHT + r.symbol + Style.RESET_ALL,
             _fmt_price(r.mark_price),
             _fmt_rate(r.funding_rate_pct),
             f"{r.interval_hours:.0f}h",
-            _fmt_next_ts(r.next_funding_ts),
-            _fmt_countdown(r.seconds_to_next_funding),
+            _fmt_next_ts(ts),
+            _fmt_countdown(_seconds_to(ts)),
         ])
 
     headers = [

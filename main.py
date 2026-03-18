@@ -267,19 +267,24 @@ def display_spike_opportunities(
             "#", "Symbol", "Long", "Short",
             "L.Rate", "S.Rate", "Spread",
             "Fees Long (o+c)", "Fees Short (o+c)", "Score",
-            "Price Spread", "Next Funding", f"Est.Profit (${POSITION_SIZE_USD:.0f})"
+            "Price Spread", "Funding At (UTC)", "In", f"Est.Profit (${POSITION_SIZE_USD:.0f})"
         ]
         rows = []
         for i, opp in enumerate(passing, 1):
             secs = opp.seconds_to_funding
-            if secs == float("inf"):
-                time_str = Fore.YELLOW + "?" + Style.RESET_ALL
-            elif secs < 60:
-                time_str = Fore.RED + Style.BRIGHT + f"{secs:.0f}s" + Style.RESET_ALL
-            elif secs < 3600:
-                time_str = Fore.YELLOW + f"{int(secs//60)}m {int(secs%60)}s" + Style.RESET_ALL
+            if secs == float("inf") or not opp.next_funding_ts:
+                countdown_str = Fore.YELLOW + "?" + Style.RESET_ALL
+                exec_str = "?"
             else:
-                time_str = f"{secs/3600:.1f}h"
+                exec_str = datetime.fromtimestamp(
+                    opp.next_funding_ts / 1000, tz=timezone.utc
+                ).strftime("%H:%M:%S")
+                if secs < 60:
+                    countdown_str = Fore.RED + Style.BRIGHT + f"{secs:.0f}s" + Style.RESET_ALL
+                elif secs < 3600:
+                    countdown_str = Fore.YELLOW + f"{int(secs//60)}m {int(secs%60)}s" + Style.RESET_ALL
+                else:
+                    countdown_str = f"{secs/3600:.1f}h"
 
             score_color = Fore.GREEN if opp.score > 0.1 else Fore.YELLOW
             rows.append([
@@ -294,7 +299,8 @@ def display_spike_opportunities(
                 f"{opp.short_fee_pct * 2:.4f}%",
                 score_color + Style.BRIGHT + f"{opp.score:+.4f}%" + Style.RESET_ALL,
                 f"{opp.price_spread_pct:.3f}%",
-                time_str,
+                exec_str,
+                countdown_str,
                 Fore.GREEN + f"${opp.estimated_profit_usd:.4f}" + Style.RESET_ALL,
             ])
 

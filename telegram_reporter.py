@@ -136,12 +136,20 @@ def send_spike_opportunities(
     if not passing:
         lines.append("\nNo opportunities pass all checks.")
     else:
+        import datetime as _dt
         lines.append("")
         for i, opp in enumerate(passing, 1):
             secs = opp.seconds_to_funding
-            time_str = f"T-{secs:.0f}s" if secs != float("inf") else "T-?"
+            if secs == float("inf") or not opp.next_funding_ts:
+                time_str = "T-?"
+                exec_str = "?"
+            else:
+                exec_str = _dt.datetime.fromtimestamp(
+                    opp.next_funding_ts / 1000, tz=_dt.timezone.utc
+                ).strftime("%H:%M:%S UTC")
+                time_str = f"T-{int(secs//60)}m{int(secs%60)}s" if secs < 3600 else f"T-{secs/3600:.1f}h"
             lines.append(
-                f"<b>#{i} {opp.symbol}</b>  {time_str}\n"
+                f"<b>#{i} {opp.symbol}</b>  🕐 {exec_str}  ({time_str})\n"
                 f"  L: <code>{opp.long_exchange}</code>  {opp.long_rate_pct:+.4f}%\n"
                 f"  S: <code>{opp.short_exchange}</code>  {opp.short_rate_pct:+.4f}%\n"
                 f"  Spread: {opp.funding_spread_pct:.4f}%  Fees: {opp.total_fee_pct:.4f}%\n"

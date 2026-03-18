@@ -524,7 +524,20 @@ def _run_pre_epoch_scan(
     if not passing:
         return
 
-    best = passing[0]
+    # Only trade pairs whose own joint funding event is imminent (≤ 30s away).
+    # The pre-scan may be triggered by a different exchange pair's event
+    # (e.g. Binance+Hyperliquid at 12:00 UTC) while the highest-scoring pair
+    # (e.g. Bybit+MEXC) doesn't credit until 16:00 UTC. Entering that trade
+    # would mean no funding is collected at the 12:00 epoch.
+    passing_now = [o for o in passing if o.seconds_to_funding <= 30.0]
+    if not passing_now:
+        print(
+            f"\n  {Fore.YELLOW}No passing pairs have a joint funding event "
+            f"within 30s of this trigger — skipping trade.{Style.RESET_ALL}"
+        )
+        return
+
+    best = passing_now[0]
     secs_to = max(0.0, (event_ts_ms - time.time() * 1000) / 1000)
     print()
     print(

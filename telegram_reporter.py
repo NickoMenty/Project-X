@@ -137,21 +137,27 @@ def send_spike_opportunities(
         lines.append("\nNo opportunities pass all checks.")
     else:
         import datetime as _dt
+
+        def _fmt_ts(ts_ms: int) -> str:
+            if not ts_ms:
+                return "?"
+            return _dt.datetime.fromtimestamp(ts_ms / 1000, tz=_dt.timezone.utc).strftime("%H:%M:%S UTC")
+
         lines.append("")
         for i, opp in enumerate(passing, 1):
             secs = opp.seconds_to_funding
-            if secs == float("inf") or not opp.next_funding_ts:
-                time_str = "T-?"
-                exec_str = "?"
+            time_str = f"T-{int(secs//60)}m{int(secs%60)}s" if secs < 3600 else f"T-{secs/3600:.1f}h"
+
+            # Assign timestamps to long/short legs
+            if opp.short_rate_pct >= 0:
+                long_ts, short_ts = opp.hedge_funding_ts, opp.next_funding_ts
             else:
-                exec_str = _dt.datetime.fromtimestamp(
-                    opp.next_funding_ts / 1000, tz=_dt.timezone.utc
-                ).strftime("%H:%M:%S UTC")
-                time_str = f"T-{int(secs//60)}m{int(secs%60)}s" if secs < 3600 else f"T-{secs/3600:.1f}h"
+                long_ts, short_ts = opp.next_funding_ts, opp.hedge_funding_ts
+
             lines.append(
-                f"<b>#{i} {opp.symbol}</b>  🕐 {exec_str}  ({time_str})\n"
-                f"  L: <code>{opp.long_exchange}</code>  {opp.long_rate_pct:+.4f}%\n"
-                f"  S: <code>{opp.short_exchange}</code>  {opp.short_rate_pct:+.4f}%\n"
+                f"<b>#{i} {opp.symbol}</b>  ({time_str})\n"
+                f"  L: <code>{opp.long_exchange}</code>  {opp.long_rate_pct:+.4f}%  🕐 {_fmt_ts(long_ts)}\n"
+                f"  S: <code>{opp.short_exchange}</code>  {opp.short_rate_pct:+.4f}%  🕐 {_fmt_ts(short_ts)}\n"
                 f"  Spread: {opp.funding_spread_pct:.4f}%  Fees: {opp.total_fee_pct:.4f}%\n"
                 f"  Score: <b>{opp.score:+.4f}%</b>  Est: <b>${opp.estimated_profit_usd:.4f}</b>"
             )

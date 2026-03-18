@@ -132,9 +132,10 @@ class SpikeOpportunity:
     short_price: float
     price_spread_pct: float     # ABS price deviation between the two legs (%)
 
-    # Timing — based on primary (short) exchange epoch
-    next_funding_ts: int        # Unix ms — primary funding event
+    # Timing
+    next_funding_ts: int        # Unix ms — primary (trigger) exchange funding event
     seconds_to_funding: float   # seconds from now to primary event
+    hedge_funding_ts: int       # Unix ms — hedge exchange next funding event
 
     # USD estimates at POSITION_SIZE_USD
     estimated_funding_usd: float
@@ -289,6 +290,7 @@ def _score_with_primary(symbol: str, ep: ExchangePair, use_a_as_primary: bool) -
         price_spread_pct=price_spread_pct,
         next_funding_ts=alignment_ts,
         seconds_to_funding=secs_to,
+        hedge_funding_ts=ts_hedge or 0,
         estimated_funding_usd=est_funding_usd,
         estimated_fee_usd=est_fee_usd,
         estimated_profit_usd=est_profit_usd,

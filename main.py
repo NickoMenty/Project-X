@@ -263,29 +263,40 @@ def display_spike_opportunities(
     if not passing:
         print(f"\n  {Fore.YELLOW}No spike opportunities pass all checks this cycle.{Style.RESET_ALL}\n")
     else:
+        def _fmt_ts(ts_ms: int) -> str:
+            if not ts_ms:
+                return "?"
+            return datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc).strftime("%H:%M:%S")
+
+        def _fmt_countdown(secs: float) -> str:
+            if secs == float("inf"):
+                return Fore.YELLOW + "?" + Style.RESET_ALL
+            if secs < 60:
+                return Fore.RED + Style.BRIGHT + f"{secs:.0f}s" + Style.RESET_ALL
+            if secs < 3600:
+                return Fore.YELLOW + f"{int(secs//60)}m {int(secs%60)}s" + Style.RESET_ALL
+            return f"{secs/3600:.1f}h"
+
+        # Determine which timestamp belongs to long/short exchange
+        def _long_short_ts(opp: "SpikeOpportunity"):
+            # next_funding_ts = primary (trigger) exchange
+            # hedge_funding_ts = hedge exchange
+            # Primary is the receiving side: short if short_rate>=0, long if short_rate<0
+            if opp.short_rate_pct >= 0:
+                return opp.hedge_funding_ts, opp.next_funding_ts   # long=hedge, short=primary
+            else:
+                return opp.next_funding_ts, opp.hedge_funding_ts   # long=primary, short=hedge
+
         headers = [
             "#", "Symbol", "Long", "Short",
             "L.Rate", "S.Rate", "Spread",
             "Fees Long (o+c)", "Fees Short (o+c)", "Score",
-            "Price Spread", "Funding At (UTC)", "In", f"Est.Profit (${POSITION_SIZE_USD:.0f})"
+            "Price Spread", "Long Funding", "Short Funding", "In",
+            f"Est.Profit (${POSITION_SIZE_USD:.0f})"
         ]
         rows = []
         for i, opp in enumerate(passing, 1):
-            secs = opp.seconds_to_funding
-            if secs == float("inf") or not opp.next_funding_ts:
-                countdown_str = Fore.YELLOW + "?" + Style.RESET_ALL
-                exec_str = "?"
-            else:
-                exec_str = datetime.fromtimestamp(
-                    opp.next_funding_ts / 1000, tz=timezone.utc
-                ).strftime("%H:%M:%S")
-                if secs < 60:
-                    countdown_str = Fore.RED + Style.BRIGHT + f"{secs:.0f}s" + Style.RESET_ALL
-                elif secs < 3600:
-                    countdown_str = Fore.YELLOW + f"{int(secs//60)}m {int(secs%60)}s" + Style.RESET_ALL
-                else:
-                    countdown_str = f"{secs/3600:.1f}h"
-
+            long_ts, short_ts = _long_short_ts(opp)
             score_color = Fore.GREEN if opp.score > 0.1 else Fore.YELLOW
             rows.append([
                 str(i),
@@ -299,8 +310,9 @@ def display_spike_opportunities(
                 f"{opp.short_fee_pct * 2:.4f}%",
                 score_color + Style.BRIGHT + f"{opp.score:+.4f}%" + Style.RESET_ALL,
                 f"{opp.price_spread_pct:.3f}%",
-                exec_str,
-                countdown_str,
+                _fmt_ts(long_ts),
+                _fmt_ts(short_ts),
+                _fmt_countdown(opp.seconds_to_funding),
                 Fore.GREEN + f"${opp.estimated_profit_usd:.4f}" + Style.RESET_ALL,
             ])
 

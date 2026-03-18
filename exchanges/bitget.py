@@ -1,41 +1,21 @@
 """
 Bitget USDT-M Futures Funding Rate Fetcher
-Endpoint: GET https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES
+Endpoints:
+  Funding (batch): GET https://api.bitget.com/api/v2/mix/market/current-fund-rate?productType=USDT-FUTURES
+                   Returns fundingRateInterval and nextUpdate per pair.
+  Prices:          GET https://api.bitget.com/api/v2/mix/market/tickers?productType=USDT-FUTURES
+                   Returns markPrice per pair.
 
-Bitget funds every 8 hours at 00:00, 08:00, 16:00 UTC.
-The tickers endpoint includes fundingRate for all pairs — no auth needed.
+Each Bitget pair has its own fundingRateInterval and nextUpdate —
+we must not assume a single shared schedule.
 """
 import requests
-import time
 from typing import List, Optional
 from .base import FundingData
 
 
 BASE_URL = "https://api.bitget.com"
 EXCHANGE_NAME = "Bitget"
-INTERVAL_HOURS = 8.0
-
-# Bitget funding times (UTC hours) — same as Bybit/Binance
-BITGET_FUNDING_HOURS_UTC = [0, 8, 16]
-
-
-def _next_bitget_funding_ms() -> int:
-    """Return next Bitget funding timestamp in milliseconds."""
-    import calendar
-    now_ts = time.time()
-    # Find the next 8h boundary (0, 8, 16 UTC)
-    gmt = time.gmtime(now_ts)
-    today_midnight_utc = calendar.timegm(
-        time.strptime(
-            f"{gmt.tm_year}-{gmt.tm_mon:02d}-{gmt.tm_mday:02d} 00:00:00",
-            "%Y-%m-%d %H:%M:%S"
-        )
-    )
-    for h in BITGET_FUNDING_HOURS_UTC:
-        ts = today_midnight_utc + h * 3600
-        if ts > now_ts:
-            return int(ts * 1000)
-    return int((today_midnight_utc + 86400) * 1000)
 
 
 def _normalize_symbol(raw: str) -> Optional[str]:
@@ -50,29 +30,54 @@ def _normalize_symbol(raw: str) -> Optional[str]:
 def fetch_funding_rates() -> List[FundingData]:
     """
     Fetch all USDT-M perpetual futures funding rates from Bitget.
-    No API key required for market data.
+
+    Uses two endpoints:
+      1. /api/v2/mix/market/current-fund-rate — funding rate, interval, nextUpdate per pair
+      2. /api/v2/mix/market/tickers           — mark price per pair
     """
-    url = f"{BASE_URL}/api/v2/mix/market/tickers"
-    params = {"productType": "USDT-FUTURES"}
-
+    # ── 1. Funding rates (with per-pair schedule) ──────────────────────────────
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(
+            f"{BASE_URL}/api/v2/mix/market/current-fund-rate",
+            params={"productType": "USDT-FUTURES"},
+            timeout=10,
+        )
         resp.raise_for_status()
-        data = resp.json()
+        funding_data = resp.json()
     except requests.RequestException as e:
-        print(f"[{EXCHANGE_NAME}] Request failed: {e}")
+        print(f"[{EXCHANGE_NAME}] Funding request failed: {e}")
         return []
 
-    if data.get("code") != "00000":
-        print(f"[{EXCHANGE_NAME}] API error: {data.get('msg')}")
+    if funding_data.get("code") != "00000":
+        print(f"[{EXCHANGE_NAME}] API error: {funding_data.get('msg')}")
         return []
 
-    tickers = data.get("data", [])
-    next_funding_ts = _next_bitget_funding_ms()
+    funding_rows = funding_data.get("data", [])
+    if not funding_rows:
+        print(f"[{EXCHANGE_NAME}] Empty funding data")
+        return []
+
+    # ── 2. Ticker for mark prices ──────────────────────────────────────────────
+    prices: dict = {}
+    try:
+        resp2 = requests.get(
+            f"{BASE_URL}/api/v2/mix/market/tickers",
+            params={"productType": "USDT-FUTURES"},
+            timeout=10,
+        )
+        resp2.raise_for_status()
+        for t in resp2.json().get("data", []):
+            sym = t.get("symbol", "")
+            price = float(t.get("markPrice") or t.get("lastPr") or 0)
+            if sym and price > 0:
+                prices[sym] = price
+    except requests.RequestException:
+        pass
+
+    # ── 3. Merge ───────────────────────────────────────────────────────────────
     results = []
-
-    for t in tickers:
-        raw_symbol = t.get("symbol", "")
+    for row in funding_rows:
+        raw_symbol = row.get("symbol", "")
         if "USDT" not in raw_symbol:
             continue
 
@@ -81,20 +86,12 @@ def fetch_funding_rates() -> List[FundingData]:
             continue
 
         try:
-            funding_rate = float(t.get("fundingRate") or 0)
-            mark_price = float(t.get("markPrice") or t.get("lastPr") or 0)
+            funding_rate   = float(row.get("fundingRate") or 0)
+            interval_hours = float(row.get("fundingRateInterval") or 8)
+            next_update_ts = int(row.get("nextUpdate") or 0)  # already ms
+            mark_price     = prices.get(raw_symbol, 0.0)
 
-            # Bitget also provides nextFundingTime in some responses
-            raw_next = t.get("nextFundingTime")
-            if raw_next:
-                nft = int(raw_next)
-                if nft < 1e12:
-                    nft *= 1000
-                next_funding_ts_used = nft
-            else:
-                next_funding_ts_used = next_funding_ts
-
-            annualized = funding_rate * (8760 / INTERVAL_HOURS) * 100
+            annualized = funding_rate * (8760 / interval_hours) * 100
 
             results.append(
                 FundingData(
@@ -104,8 +101,8 @@ def fetch_funding_rates() -> List[FundingData]:
                     funding_rate=funding_rate,
                     funding_rate_pct=funding_rate * 100,
                     mark_price=mark_price,
-                    next_funding_ts=next_funding_ts_used,
-                    interval_hours=INTERVAL_HOURS,
+                    next_funding_ts=next_update_ts if next_update_ts > 0 else None,
+                    interval_hours=interval_hours,
                     annualized_rate=annualized,
                 )
             )

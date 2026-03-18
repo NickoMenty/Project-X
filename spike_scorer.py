@@ -159,34 +159,44 @@ class SpikeOpportunity:
 
 # ── Per-pair scoring ──────────────────────────────────────────────────────────
 
-def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
+def _score_with_primary(symbol: str, ep: ExchangePair, use_a_as_primary: bool) -> SpikeOpportunity:
     """
-    Score a single ExchangePair for single-epoch spike trading.
-    Always returns a SpikeOpportunity — check .passes_all for actionability.
+    Score one direction of an ExchangePair for single-epoch trading.
+
+    use_a_as_primary=True  → exchange_a's next event is the trigger.
+                             Position on a = receiving side (short if rate_a>0, long if rate_a<0).
+                             Position on b = opposite (hedge, delta neutral).
+    use_a_as_primary=False → same logic but exchange_b drives the trigger.
+
+    Calling both directions per pair catches opportunities where the "worse"
+    exchange (by spread) has an imminent event and the single-epoch gross
+    still exceeds fees.
     """
     fail_reasons: List[str] = []
     now_ms = time.time() * 1000
+    tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
 
-    # ── Trade direction ───────────────────────────────────────────────────────
-    # Short the higher-rate side (collect), long the lower-rate side (pay less).
-    # net_ab > 0 means rate_a > rate_b → short A, long B.
-    net_ab = ep.rate_a_pct - ep.rate_b_pct
-    if net_ab >= 0:
-        long_ex,    short_ex    = ep.exchange_b, ep.exchange_a
-        long_rate,  short_rate  = ep.rate_b_pct, ep.rate_a_pct
-        long_price, short_price = ep.price_b,    ep.price_a
-        long_next,  short_next  = ep.next_ts_b,  ep.next_ts_a
-        step_short = int(ep.interval_a * 3_600_000)
-        step_long  = int(ep.interval_b * 3_600_000)
+    # ── Assign primary / hedge ────────────────────────────────────────────────
+    if use_a_as_primary:
+        p_ex, p_rate, p_next, p_step = ep.exchange_a, ep.rate_a_pct, ep.next_ts_a, int(ep.interval_a * 3_600_000)
+        p_price = ep.price_a
+        h_ex, h_rate, h_next, h_step = ep.exchange_b, ep.rate_b_pct, ep.next_ts_b, int(ep.interval_b * 3_600_000)
+        h_price = ep.price_b
     else:
-        long_ex,    short_ex    = ep.exchange_a, ep.exchange_b
-        long_rate,  short_rate  = ep.rate_a_pct, ep.rate_b_pct
-        long_price, short_price = ep.price_a,    ep.price_b
-        long_next,  short_next  = ep.next_ts_a,  ep.next_ts_b
-        step_short = int(ep.interval_b * 3_600_000)
-        step_long  = int(ep.interval_a * 3_600_000)
+        p_ex, p_rate, p_next, p_step = ep.exchange_b, ep.rate_b_pct, ep.next_ts_b, int(ep.interval_b * 3_600_000)
+        p_price = ep.price_b
+        h_ex, h_rate, h_next, h_step = ep.exchange_a, ep.rate_a_pct, ep.next_ts_a, int(ep.interval_a * 3_600_000)
+        h_price = ep.price_a
 
-    funding_spread_pct = abs(net_ab)
+    # ── Position: be on the RECEIVING side of the primary exchange ────────────
+    # rate > 0 → shorts receive → SHORT primary, LONG hedge
+    # rate < 0 → longs receive  → LONG  primary, SHORT hedge
+    if p_rate >= 0:
+        short_ex, short_rate, short_price = p_ex, p_rate, p_price
+        long_ex,  long_rate,  long_price  = h_ex, h_rate, h_price
+    else:
+        long_ex,  long_rate,  long_price  = p_ex, p_rate, p_price
+        short_ex, short_rate, short_price = h_ex, h_rate, h_price
 
     # ── Fees ──────────────────────────────────────────────────────────────────
     long_fee  = _fee(long_ex)
@@ -194,65 +204,47 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     total_fee = long_fee * 2.0 + short_fee * 2.0
 
     # ── Advance timestamps past now ───────────────────────────────────────────
-    ts_short: Optional[int] = None
-    ts_long:  Optional[int] = None
-    if short_next is not None:
-        ts_short = int(short_next)
-        while ts_short < now_ms: ts_short += step_short
-    if long_next is not None:
-        ts_long = int(long_next)
-        while ts_long < now_ms: ts_long += step_long
+    ts_primary: Optional[int] = None
+    ts_hedge:   Optional[int] = None
+    if p_next is not None:
+        ts_primary = int(p_next)
+        while ts_primary < now_ms: ts_primary += p_step
+    if h_next is not None:
+        ts_hedge = int(h_next)
+        while ts_hedge < now_ms: ts_hedge += h_step
 
-    # ── Per-leg net funding (positive = we receive) ───────────────────────────
-    # Short leg receives when rate > 0; pays when rate < 0.
-    # Long  leg receives when rate < 0; pays when rate > 0.
-    net_short_receive = short_rate   # >0 = receive, <0 = pay
-    net_long_receive  = -long_rate   # >0 = receive (when long_rate<0), <0 = pay
-
-    # ── Filter 1: At least one receiving leg must be imminent ─────────────────
-    # The PRIMARY is the leg we're RECEIVING from at its upcoming epoch.
-    # The OTHER leg is the hedge (delta neutral) — it may or may not also credit.
-    alignment_ts: int = 0
-    secs_to: float = float("inf")
-    hedge_credits: bool = False
-
-    # By construction short_rate >= long_rate, so at least one leg always receives:
-    #   short_rate > 0  → shorts receive on short_ex
-    #   long_rate  < 0  → longs receive on long_ex  (and short_rate >= long_rate → short_rate could be either sign)
-    #   Both zero       → score will be <=0 and filtered by Filter 3
-    short_profitable = net_short_receive > 0 and ts_short is not None
-    long_profitable  = net_long_receive  > 0 and ts_long  is not None
-
-    # Pick the soonest receiving leg as the trigger epoch.
-    candidates = []
-    if short_profitable: candidates.append(ts_short)
-    if long_profitable:  candidates.append(ts_long)
-
-    if candidates:
-        alignment_ts = min(candidates)
+    # ── Timing: align to primary event ───────────────────────────────────────
+    if ts_primary is None:
+        fail_reasons.append(f"{p_ex} missing next_funding_ts for this pair")
+        alignment_ts = ts_hedge or 0
+        secs_to = float("inf")
     else:
-        alignment_ts = ts_short or ts_long or 0  # both zero rates — will fail Filter 3
-
-    secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0) if alignment_ts else float("inf")
-
-    # Check if both legs credit near the same epoch
-    tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
-    if ts_short is not None and ts_long is not None:
-        if abs(ts_short - ts_long) <= tol_ms:
-            hedge_credits = True
+        alignment_ts = ts_primary
+        secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
 
     # ── Gross funding capture ─────────────────────────────────────────────────
-    # Sum receiving contributions from both legs if both credit at the epoch.
-    # If only one leg credits, only count that leg's contribution.
-    if hedge_credits:
-        # Both credit — sum net receives from both legs
-        gross_pct = net_short_receive + net_long_receive
-    elif ts_short == alignment_ts or (ts_short is not None and abs(ts_short - alignment_ts) <= ALIGNMENT_TOLERANCE_SECONDS * 1000):
-        gross_pct = net_short_receive
-    else:
-        gross_pct = net_long_receive
+    # Primary always contributes |p_rate| (we chose the receiving side).
+    gross_primary = abs(p_rate)
 
-    score = gross_pct - total_fee
+    # Hedge contributes only if it credits near the same epoch.
+    hedge_credits = (
+        ts_primary is not None
+        and ts_hedge is not None
+        and abs(ts_hedge - ts_primary) <= tol_ms
+    )
+    if hedge_credits:
+        # Our hedge position: LONG hedge if p_rate>=0 (we're short primary),
+        #                     SHORT hedge if p_rate<0  (we're long primary).
+        # LONG  hedge receives when h_rate < 0  → hedge_contribution = -h_rate
+        # SHORT hedge receives when h_rate > 0  → hedge_contribution =  h_rate
+        hedge_contribution = -h_rate if p_rate >= 0 else h_rate
+    else:
+        hedge_contribution = 0.0
+
+    gross_pct = gross_primary + hedge_contribution
+    score     = gross_pct - total_fee
+
+    funding_spread_pct = abs(ep.rate_a_pct - ep.rate_b_pct)
 
     # ── Filter 2: Price spread ────────────────────────────────────────────────
     if long_price > 0 and short_price > 0:
@@ -305,6 +297,17 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     )
 
 
+def score_spike(symbol: str, ep: ExchangePair) -> List[SpikeOpportunity]:
+    """
+    Score both trigger directions for an ExchangePair.
+    Returns two SpikeOpportunity objects — one per exchange as primary.
+    """
+    return [
+        _score_with_primary(symbol, ep, use_a_as_primary=True),
+        _score_with_primary(symbol, ep, use_a_as_primary=False),
+    ]
+
+
 # ── Batch scoring ─────────────────────────────────────────────────────────────
 
 def score_all_spikes(
@@ -322,8 +325,8 @@ def score_all_spikes(
 
     for symbol, pr in records.items():
         for ep in pr.exchange_pairs:
-            opp = score_spike(symbol, ep)
-            (passing if opp.passes_all else failing).append(opp)
+            for opp in score_spike(symbol, ep):
+                (passing if opp.passes_all else failing).append(opp)
 
     passing.sort(key=lambda o: -o.score)
     failing.sort(key=lambda o: -o.funding_spread_pct)

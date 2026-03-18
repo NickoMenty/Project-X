@@ -93,22 +93,35 @@ def _total_fee_pct(ex_a: str, ex_b: str) -> float:
 class SpikeOpportunity:
     """
     Full scored assessment of one ExchangePair for a single-epoch spike trade.
+
+    The primary exchange (short_exchange) is the one about to credit funding —
+    its event must be imminent for the trade to execute.
+    The hedge exchange (long_exchange) neutralises delta. It may or may not
+    credit funding at the same time (hedge_credits flag).
+
+    gross_pct = short_rate_pct                    (primary only)
+              = short_rate_pct - long_rate_pct    (both credit, current model)
+    score     = gross_pct - total_fee_pct
     """
     symbol: str
     exchange_pair: ExchangePair
 
     # Trade direction
-    long_exchange: str          # go LONG here (lower effective rate — pay less)
-    short_exchange: str         # go SHORT here (higher effective rate — collect more)
+    long_exchange: str          # go LONG here — delta hedge
+    short_exchange: str         # go SHORT here — primary funding collector
 
     # Rates at the time of scoring (%, per native epoch)
-    long_rate_pct: float        # rate paid by longs on long_exchange
-    short_rate_pct: float       # rate paid by longs on short_exchange (we collect as short)
+    long_rate_pct: float
+    short_rate_pct: float
 
     # Core numbers
-    funding_spread_pct: float   # ABS(short_rate_pct - long_rate_pct) — gross capture
+    gross_pct: float            # actual expected funding capture this epoch
+    funding_spread_pct: float   # full ABS(short_rate - long_rate) — reference only
     total_fee_pct: float        # fee_long×2 + fee_short×2 — round-trip cost
-    score: float                # funding_spread_pct - total_fee_pct  (>0 = profitable)
+    score: float                # gross_pct - total_fee_pct  (>0 = profitable)
+
+    # Hedge behaviour
+    hedge_credits: bool         # True if hedge exchange also credits at this epoch
 
     # Individual fees (for display)
     long_fee_pct: float
@@ -119,9 +132,9 @@ class SpikeOpportunity:
     short_price: float
     price_spread_pct: float     # ABS price deviation between the two legs (%)
 
-    # Timing
-    next_funding_ts: int        # Unix ms — the joint funding event
-    seconds_to_funding: float   # seconds from now to that event
+    # Timing — based on primary (short) exchange epoch
+    next_funding_ts: int        # Unix ms — primary funding event
+    seconds_to_funding: float   # seconds from now to primary event
 
     # USD estimates at POSITION_SIZE_USD
     estimated_funding_usd: float
@@ -163,11 +176,15 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
         long_rate,  short_rate  = ep.rate_b_pct, ep.rate_a_pct
         long_price, short_price = ep.price_b,    ep.price_a
         long_next,  short_next  = ep.next_ts_b,  ep.next_ts_a
+        step_short = int(ep.interval_a * 3_600_000)
+        step_long  = int(ep.interval_b * 3_600_000)
     else:
         long_ex,    short_ex    = ep.exchange_a, ep.exchange_b
         long_rate,  short_rate  = ep.rate_a_pct, ep.rate_b_pct
         long_price, short_price = ep.price_a,    ep.price_b
         long_next,  short_next  = ep.next_ts_a,  ep.next_ts_b
+        step_short = int(ep.interval_b * 3_600_000)
+        step_long  = int(ep.interval_a * 3_600_000)
 
     funding_spread_pct = abs(net_ab)
 
@@ -175,31 +192,39 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     long_fee  = _fee(long_ex)
     short_fee = _fee(short_ex)
     total_fee = long_fee * 2.0 + short_fee * 2.0
-    score     = funding_spread_pct - total_fee
 
-    # ── Filter 1: Per-pair timestamp alignment (from API, interval-advanced) ──
-    # Uses actual next_funding_ts from each exchange's API response for this
-    # specific symbol. Advances stale timestamps by the pair's interval so
-    # near-rollover fetches don't cause false misalignment.
+    # ── Filter 1: Primary (short) exchange must be imminent ───────────────────
+    # The hedge (long) exchange does NOT need to align — it only contributes
+    # bonus funding if it happens to credit at the same time.
     alignment_ts: int = 0
     secs_to: float = float("inf")
+    hedge_credits: bool = False
 
-    if long_next is None or short_next is None:
-        fail_reasons.append("next_funding_ts missing on one or both exchanges")
+    if short_next is None:
+        fail_reasons.append(f"{short_ex} missing next_funding_ts for this pair")
     else:
-        step_long  = int(ep.interval_a * 3_600_000) if long_ex  == ep.exchange_a else int(ep.interval_b * 3_600_000)
-        step_short = int(ep.interval_b * 3_600_000) if short_ex == ep.exchange_b else int(ep.interval_a * 3_600_000)
-        ts_long, ts_short = int(long_next), int(short_next)
-        while ts_long  < now_ms: ts_long  += step_long
-        while ts_short < now_ms: ts_short += step_short
-        diff_s = abs(ts_long - ts_short) / 1000.0
-        if diff_s > ALIGNMENT_TOLERANCE_SECONDS:
-            fail_reasons.append(
-                f"funding clocks misaligned by {diff_s:.0f}s for this pair "
-                f"(max {ALIGNMENT_TOLERANCE_SECONDS:.0f}s)"
-            )
-        alignment_ts = max(ts_long, ts_short)
+        ts_short = int(short_next)
+        while ts_short < now_ms:
+            ts_short += step_short
+        alignment_ts = ts_short
         secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
+
+        # Check if hedge also credits near the same time (bonus — not required)
+        if long_next is not None:
+            ts_long = int(long_next)
+            while ts_long < now_ms:
+                ts_long += step_long
+            if abs(ts_long - ts_short) <= ALIGNMENT_TOLERANCE_SECONDS * 1000:
+                hedge_credits = True
+
+    # ── Gross funding capture ─────────────────────────────────────────────────
+    # Primary (short) always contributes short_rate_pct.
+    # Hedge contributes only if it credits at the same epoch.
+    gross_pct = short_rate
+    if hedge_credits:
+        gross_pct -= long_rate  # long_rate > 0 → we pay; long_rate < 0 → we receive
+
+    score = gross_pct - total_fee
 
     # ── Filter 2: Price spread ────────────────────────────────────────────────
     if long_price > 0 and short_price > 0:
@@ -212,15 +237,16 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
             f"price spread {price_spread_pct:.3f}% >= {MAX_PRICE_SPREAD_PCT:.1f}% max"
         )
 
-    # ── Filter 3: Positive score ──────────────────────────────────────────────
+    # ── Filter 3: Gross must exceed total fees ────────────────────────────────
     if score <= 0:
         fail_reasons.append(
-            f"funding spread {funding_spread_pct:.4f}% "
+            f"gross {gross_pct:.4f}% "
+            f"({'primary+hedge' if hedge_credits else 'primary only'}) "
             f"<= total fees {total_fee:.4f}%"
         )
 
     # ── USD estimates ─────────────────────────────────────────────────────────
-    est_funding_usd = POSITION_SIZE_USD * funding_spread_pct / 100.0
+    est_funding_usd = POSITION_SIZE_USD * gross_pct / 100.0
     est_fee_usd     = POSITION_SIZE_USD * total_fee / 100.0
     est_profit_usd  = POSITION_SIZE_USD * score / 100.0
 
@@ -231,9 +257,11 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
         short_exchange=short_ex,
         long_rate_pct=long_rate,
         short_rate_pct=short_rate,
+        gross_pct=gross_pct,
         funding_spread_pct=funding_spread_pct,
         total_fee_pct=total_fee,
         score=score,
+        hedge_credits=hedge_credits,
         long_fee_pct=long_fee,
         short_fee_pct=short_fee,
         long_price=long_price,

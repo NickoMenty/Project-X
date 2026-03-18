@@ -36,8 +36,7 @@ from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
 from spike_scorer import (
     score_all_spikes, SpikeOpportunity, POSITION_SIZE_USD,
-    ALIGNMENT_TOLERANCE_SECONDS,
-)  # ALIGNMENT_TOLERANCE_SECONDS used in _next_joint_event_ms
+)
 from paper_trader import (
     simulate_entry, simulate_exit, print_trade_report,
     EXIT_WAIT_SECONDS,
@@ -379,7 +378,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
         # ── Smart sleep: wake at T-15s before the nearest joint funding event ──
         now_ms = time.time() * 1000
         cycle_end_ms = now_ms + interval * 1000
-        next_event = _next_joint_event_ms(records) if not no_score else None
+        next_event = _next_primary_event_ms(records) if not no_score else None
         prescan_ms = (next_event - 15_000) if next_event else None
 
         # Fire pre-scan if: event is within this cycle window, T-15s hasn't
@@ -457,29 +456,33 @@ def _fetch_and_build(
 #  Epoch watcher helpers
 # ─────────────────────────────────────────────
 
-def _next_joint_event_ms(records: dict) -> Optional[int]:
+def _next_primary_event_ms(records: dict) -> Optional[int]:
     """
-    Return the soonest upcoming Unix-ms timestamp at which any two exchanges
-    have aligned funding events for the same pair, using per-pair API timestamps
-    advanced by interval to handle near-rollover staleness.
+    Return the soonest upcoming funding event on ANY individual exchange for
+    ANY pair. The pre-scan uses this to wake up at the right moment — the
+    scorer then determines which pairs have their PRIMARY (high-rate) exchange
+    crediting at that time, regardless of whether the hedge also credits.
     """
     now_ms = time.time() * 1000
-    tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
     earliest: Optional[int] = None
 
+    seen: set = set()
     for pr in records.values():
         for ep in pr.exchange_pairs:
-            if ep.next_ts_a is None or ep.next_ts_b is None:
-                continue
-            step_a = int(ep.interval_a * 3_600_000)
-            step_b = int(ep.interval_b * 3_600_000)
-            ts_a, ts_b = int(ep.next_ts_a), int(ep.next_ts_b)
-            while ts_a < now_ms: ts_a += step_a
-            while ts_b < now_ms: ts_b += step_b
-            if abs(ts_a - ts_b) <= tol_ms:
-                event_ts = max(ts_a, ts_b)
-                if earliest is None or event_ts < earliest:
-                    earliest = event_ts
+            for exchange, next_ts, interval_h in [
+                (ep.exchange_a, ep.next_ts_a, ep.interval_a),
+                (ep.exchange_b, ep.next_ts_b, ep.interval_b),
+            ]:
+                key = (exchange, pr.symbol)
+                if key in seen or next_ts is None:
+                    continue
+                seen.add(key)
+                ts = int(next_ts)
+                step = int(interval_h * 3_600_000)
+                while ts < now_ms:
+                    ts += step
+                if earliest is None or ts < earliest:
+                    earliest = ts
 
     return earliest
 

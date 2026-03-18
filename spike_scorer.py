@@ -216,31 +216,30 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     secs_to: float = float("inf")
     hedge_credits: bool = False
 
+    # By construction short_rate >= long_rate, so at least one leg always receives:
+    #   short_rate > 0  → shorts receive on short_ex
+    #   long_rate  < 0  → longs receive on long_ex  (and short_rate >= long_rate → short_rate could be either sign)
+    #   Both zero       → score will be <=0 and filtered by Filter 3
     short_profitable = net_short_receive > 0 and ts_short is not None
     long_profitable  = net_long_receive  > 0 and ts_long  is not None
 
-    if not short_profitable and not long_profitable:
-        fail_reasons.append(
-            f"no receiving leg: short_rate={short_rate:+.4f}% "
-            f"long_rate={long_rate:+.4f}% (both legs pay at imminent epoch)"
-        )
-        alignment_ts = ts_short or ts_long or 0
-        secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0) if alignment_ts else float("inf")
-    else:
-        # Pick the soonest profitable leg as the trigger epoch.
-        # If only one is profitable, that's the primary.
-        # If both are profitable, pick the earlier one.
-        candidates = []
-        if short_profitable: candidates.append(ts_short)
-        if long_profitable:  candidates.append(ts_long)
-        alignment_ts = min(candidates)
-        secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
+    # Pick the soonest receiving leg as the trigger epoch.
+    candidates = []
+    if short_profitable: candidates.append(ts_short)
+    if long_profitable:  candidates.append(ts_long)
 
-        # Check if the OTHER leg also credits near the same time
-        tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
-        if ts_short is not None and ts_long is not None:
-            if abs(ts_short - ts_long) <= tol_ms:
-                hedge_credits = True
+    if candidates:
+        alignment_ts = min(candidates)
+    else:
+        alignment_ts = ts_short or ts_long or 0  # both zero rates — will fail Filter 3
+
+    secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0) if alignment_ts else float("inf")
+
+    # Check if both legs credit near the same epoch
+    tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
+    if ts_short is not None and ts_long is not None:
+        if abs(ts_short - ts_long) <= tol_ms:
+            hedge_credits = True
 
     # ── Gross funding capture ─────────────────────────────────────────────────
     # Sum receiving contributions from both legs if both credit at the epoch.

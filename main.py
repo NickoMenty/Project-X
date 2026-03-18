@@ -281,8 +281,7 @@ def display_spike_opportunities(
         def _long_short_ts(opp: "SpikeOpportunity"):
             # next_funding_ts = primary (trigger) exchange
             # hedge_funding_ts = hedge exchange
-            # Primary is the receiving side: short if short_rate>=0, long if short_rate<0
-            if opp.short_rate_pct >= 0:
+            if opp.primary_is_short:
                 return opp.hedge_funding_ts, opp.next_funding_ts   # long=hedge, short=primary
             else:
                 return opp.next_funding_ts, opp.hedge_funding_ts   # long=primary, short=hedge

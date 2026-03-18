@@ -120,6 +120,9 @@ class SpikeOpportunity:
     total_fee_pct: float        # fee_long×2 + fee_short×2 — round-trip cost
     score: float                # gross_pct - total_fee_pct  (>0 = profitable)
 
+    # Trade direction meta
+    primary_is_short: bool      # True = short_exchange holds next_funding_ts; False = long does
+
     # Hedge behaviour
     hedge_credits: bool         # True if hedge exchange also credits at this epoch
 
@@ -286,6 +289,7 @@ def _score_with_primary(symbol: str, ep: ExchangePair, use_a_as_primary: bool) -
         funding_spread_pct=funding_spread_pct,
         total_fee_pct=total_fee,
         score=score,
+        primary_is_short=(p_rate >= 0),
         hedge_credits=hedge_credits,
         long_fee_pct=long_fee,
         short_fee_pct=short_fee,

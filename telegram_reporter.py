@@ -149,7 +149,7 @@ def send_spike_opportunities(
             time_str = f"T-{int(secs//60)}m{int(secs%60)}s" if secs < 3600 else f"T-{secs/3600:.1f}h"
 
             # Assign timestamps to long/short legs
-            if opp.short_rate_pct >= 0:
+            if opp.primary_is_short:
                 long_ts, short_ts = opp.hedge_funding_ts, opp.next_funding_ts
             else:
                 long_ts, short_ts = opp.next_funding_ts, opp.hedge_funding_ts

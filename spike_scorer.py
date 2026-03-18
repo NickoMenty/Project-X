@@ -223,6 +223,10 @@ def _score_with_primary(symbol: str, ep: ExchangePair, use_a_as_primary: bool) -
         alignment_ts = ts_primary
         secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
 
+    # Filter 1: primary funding must be within the next 1 hour
+    if secs_to > 3600:
+        fail_reasons.append(f"primary funding > 1h away (T-{secs_to/60:.0f}m)")
+
     # ── Gross funding capture ─────────────────────────────────────────────────
     # Primary always contributes |p_rate| (we chose the receiving side).
     gross_primary = abs(p_rate)

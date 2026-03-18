@@ -557,6 +557,9 @@ def _run_pre_epoch_scan(
         + Style.RESET_ALL
     )
 
+    # Send imminent-only opportunities to Telegram right before trade entry
+    send_spike_opportunities(passing_now, [], secs_to)
+
     # ── T-10s: simulate entry ─────────────────────────────────────────────────
     wait_to_entry = max(0.0, (event_ts_ms - 10_000 - time.time() * 1000) / 1000)
     if wait_to_entry > 0:

@@ -36,8 +36,8 @@ from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
 from spike_scorer import (
     score_all_spikes, SpikeOpportunity, POSITION_SIZE_USD,
-)
-from funding_schedule import next_joint_event_ms as _schedule_next_joint_ms
+    ALIGNMENT_TOLERANCE_SECONDS,
+)  # ALIGNMENT_TOLERANCE_SECONDS used in _next_joint_event_ms
 from paper_trader import (
     simulate_entry, simulate_exit, print_trade_report,
     EXIT_WAIT_SECONDS,
@@ -460,22 +460,26 @@ def _fetch_and_build(
 def _next_joint_event_ms(records: dict) -> Optional[int]:
     """
     Return the soonest upcoming Unix-ms timestamp at which any two exchanges
-    have a joint funding event, using hardcoded schedules from funding_schedule.
+    have aligned funding events for the same pair, using per-pair API timestamps
+    advanced by interval to handle near-rollover staleness.
     """
     now_ms = time.time() * 1000
+    tol_ms = ALIGNMENT_TOLERANCE_SECONDS * 1000
     earliest: Optional[int] = None
 
-    seen_pairs: set = set()
     for pr in records.values():
         for ep in pr.exchange_pairs:
-            key = tuple(sorted([ep.exchange_a, ep.exchange_b]))
-            if key in seen_pairs:
+            if ep.next_ts_a is None or ep.next_ts_b is None:
                 continue
-            seen_pairs.add(key)
-            ts = _schedule_next_joint_ms(ep.exchange_a, ep.exchange_b)
-            if ts is not None and ts > now_ms:
-                if earliest is None or ts < earliest:
-                    earliest = ts
+            step_a = int(ep.interval_a * 3_600_000)
+            step_b = int(ep.interval_b * 3_600_000)
+            ts_a, ts_b = int(ep.next_ts_a), int(ep.next_ts_b)
+            while ts_a < now_ms: ts_a += step_a
+            while ts_b < now_ms: ts_b += step_b
+            if abs(ts_a - ts_b) <= tol_ms:
+                event_ts = max(ts_a, ts_b)
+                if earliest is None or event_ts < earliest:
+                    earliest = event_ts
 
     return earliest
 

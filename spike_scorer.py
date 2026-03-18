@@ -43,7 +43,6 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from pair_engine import ExchangePair, PairRecord
-from funding_schedule import next_joint_event_ms, exchanges_align
 
 
 # ── Configurable constants ────────────────────────────────────────────────────
@@ -66,6 +65,10 @@ DEFAULT_TAKER_FEE_PCT: float = 0.050
 
 # Max allowed absolute price deviation between the two legs (%)
 MAX_PRICE_SPREAD_PCT: float = 2.0
+
+# Max allowed difference between the two per-pair next_funding_ts values (seconds).
+# Handles minor API clock skew between exchanges.
+ALIGNMENT_TOLERANCE_SECONDS: float = 60.0
 
 
 
@@ -174,19 +177,28 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     total_fee = long_fee * 2.0 + short_fee * 2.0
     score     = funding_spread_pct - total_fee
 
-    # ── Filter 1: Schedule alignment (hardcoded UTC funding windows) ─────────
-    # Uses canonical exchange schedules — not API-returned timestamps,
-    # which can be stale or already rolled over near an epoch boundary.
+    # ── Filter 1: Per-pair timestamp alignment (from API, interval-advanced) ──
+    # Uses actual next_funding_ts from each exchange's API response for this
+    # specific symbol. Advances stale timestamps by the pair's interval so
+    # near-rollover fetches don't cause false misalignment.
     alignment_ts: int = 0
     secs_to: float = float("inf")
 
-    joint_ts = next_joint_event_ms(long_ex, short_ex)
-    if joint_ts is None:
-        fail_reasons.append(
-            f"{long_ex} and {short_ex} share no common funding windows"
-        )
+    if long_next is None or short_next is None:
+        fail_reasons.append("next_funding_ts missing on one or both exchanges")
     else:
-        alignment_ts = joint_ts
+        step_long  = int(ep.interval_a * 3_600_000) if long_ex  == ep.exchange_a else int(ep.interval_b * 3_600_000)
+        step_short = int(ep.interval_b * 3_600_000) if short_ex == ep.exchange_b else int(ep.interval_a * 3_600_000)
+        ts_long, ts_short = int(long_next), int(short_next)
+        while ts_long  < now_ms: ts_long  += step_long
+        while ts_short < now_ms: ts_short += step_short
+        diff_s = abs(ts_long - ts_short) / 1000.0
+        if diff_s > ALIGNMENT_TOLERANCE_SECONDS:
+            fail_reasons.append(
+                f"funding clocks misaligned by {diff_s:.0f}s for this pair "
+                f"(max {ALIGNMENT_TOLERANCE_SECONDS:.0f}s)"
+            )
+        alignment_ts = max(ts_long, ts_short)
         secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
 
     # ── Filter 2: Price spread ────────────────────────────────────────────────

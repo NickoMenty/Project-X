@@ -36,7 +36,6 @@ Configurable constants
   POSITION_SIZE_USD         — USD size of each leg
   TAKER_FEE_PCT             — per-exchange taker fee dict (%)
   MAX_PRICE_SPREAD_PCT      — maximum allowed price gap between legs
-  ALIGNMENT_TOLERANCE_SECONDS — how close the two funding timestamps must be
 """
 
 import time
@@ -44,6 +43,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 from pair_engine import ExchangePair, PairRecord
+from funding_schedule import next_joint_event_ms, exchanges_align
 
 
 # ── Configurable constants ────────────────────────────────────────────────────
@@ -67,8 +67,6 @@ DEFAULT_TAKER_FEE_PCT: float = 0.050
 # Max allowed absolute price deviation between the two legs (%)
 MAX_PRICE_SPREAD_PCT: float = 2.0
 
-# Max allowed difference between the two next_funding_ts values (seconds)
-ALIGNMENT_TOLERANCE_SECONDS: float = 30.0
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -176,21 +174,19 @@ def score_spike(symbol: str, ep: ExchangePair) -> SpikeOpportunity:
     total_fee = long_fee * 2.0 + short_fee * 2.0
     score     = funding_spread_pct - total_fee
 
-    # ── Filter 1: Timestamp alignment ────────────────────────────────────────
+    # ── Filter 1: Schedule alignment (hardcoded UTC funding windows) ─────────
+    # Uses canonical exchange schedules — not API-returned timestamps,
+    # which can be stale or already rolled over near an epoch boundary.
     alignment_ts: int = 0
     secs_to: float = float("inf")
 
-    if long_next is None or short_next is None:
-        fail_reasons.append("next_funding_ts missing on one or both exchanges")
+    joint_ts = next_joint_event_ms(long_ex, short_ex)
+    if joint_ts is None:
+        fail_reasons.append(
+            f"{long_ex} and {short_ex} share no common funding windows"
+        )
     else:
-        diff_s = abs(long_next - short_next) / 1000.0
-        if diff_s > ALIGNMENT_TOLERANCE_SECONDS:
-            fail_reasons.append(
-                f"timestamps misaligned by {diff_s:.0f}s "
-                f"(max {ALIGNMENT_TOLERANCE_SECONDS:.0f}s)"
-            )
-        # Canonical event = later of the two (both must be credited near this time)
-        alignment_ts = max(long_next, short_next)
+        alignment_ts = joint_ts
         secs_to = max(0.0, (alignment_ts - now_ms) / 1000.0)
 
     # ── Filter 2: Price spread ────────────────────────────────────────────────

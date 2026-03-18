@@ -1,44 +1,21 @@
 """
 MEXC Futures Funding Rate Fetcher
-Endpoint: GET https://contract.mexc.com/api/v1/contract/funding_rate/{symbol}
-Batch:    GET https://contract.mexc.com/api/v1/contract/ticker  (all tickers, includes fundingRate)
+Endpoints:
+  Funding (batch): GET https://contract.mexc.com/api/v1/contract/funding_rate
+                   Returns all pairs with collectCycle and nextSettleTime per pair.
+  Prices:          GET https://contract.mexc.com/api/v1/contract/ticker
+                   Returns mark price (fairPrice) per pair.
 
-MEXC funds every 8 hours at 04:00, 12:00, 20:00 UTC.
-The ticker endpoint is used as it returns all pairs in one call.
+Each MEXC pair has its own collectCycle (1h / 4h / 8h) and nextSettleTime —
+we must not assume a single shared schedule.
 """
 import requests
-import time
 from typing import List, Optional
 from .base import FundingData
 
 
 BASE_URL = "https://contract.mexc.com"
 EXCHANGE_NAME = "MEXC"
-INTERVAL_HOURS = 8.0
-
-# MEXC funding times (UTC hours)
-MEXC_FUNDING_HOURS_UTC = [4, 12, 20]
-
-
-def _next_mexc_funding_ms() -> int:
-    """Return next MEXC funding timestamp in milliseconds."""
-    now = time.gmtime()
-    current_hour = now.tm_hour
-    today_base = int(time.mktime(time.strptime(
-        f"{now.tm_year}-{now.tm_mon:02d}-{now.tm_mday:02d} 00:00:00",
-        "%Y-%m-%d %H:%M:%S"
-    )))
-    # Actually use UTC properly
-    import calendar
-    today_utc = calendar.timegm(time.gmtime()) - (time.gmtime().tm_hour * 3600
-                                                   + time.gmtime().tm_min * 60
-                                                   + time.gmtime().tm_sec)
-    for h in MEXC_FUNDING_HOURS_UTC:
-        ts = today_utc + h * 3600
-        if ts > time.time():
-            return ts * 1000
-    # All passed today — first slot tomorrow
-    return (today_utc + 86400 + MEXC_FUNDING_HOURS_UTC[0] * 3600) * 1000
 
 
 def _normalize_symbol(raw: str) -> Optional[str]:
@@ -53,33 +30,42 @@ def _normalize_symbol(raw: str) -> Optional[str]:
 def fetch_funding_rates() -> List[FundingData]:
     """
     Fetch all USDT-margined futures funding rates from MEXC.
-    Uses the ticker endpoint which returns fundingRate for all symbols.
+
+    Uses two endpoints:
+      1. /api/v1/contract/funding_rate — funding rate, collectCycle, nextSettleTime per pair
+      2. /api/v1/contract/ticker       — mark price (fairPrice) per pair
     """
-    url = f"{BASE_URL}/api/v1/contract/ticker"
-
+    # ── 1. Funding rates (with per-pair schedule) ──────────────────────────────
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(f"{BASE_URL}/api/v1/contract/funding_rate", timeout=10)
         resp.raise_for_status()
-        data = resp.json()
+        funding_data = resp.json()
     except requests.RequestException as e:
-        print(f"[{EXCHANGE_NAME}] Request failed: {e}")
+        print(f"[{EXCHANGE_NAME}] Funding request failed: {e}")
         return []
 
-    # Response: {"success": true, "code": 0, "data": [...]}
-    if not data.get("success") and data.get("code") != 0:
-        print(f"[{EXCHANGE_NAME}] API error: {data}")
+    funding_rows = funding_data.get("data", [])
+    if not funding_rows:
+        print(f"[{EXCHANGE_NAME}] Empty funding data")
         return []
 
-    tickers = data.get("data", [])
-    if not tickers:
-        print(f"[{EXCHANGE_NAME}] Empty data in response")
-        return []
+    # ── 2. Ticker for mark prices ──────────────────────────────────────────────
+    prices: dict = {}
+    try:
+        resp2 = requests.get(f"{BASE_URL}/api/v1/contract/ticker", timeout=10)
+        resp2.raise_for_status()
+        for t in resp2.json().get("data", []):
+            sym = t.get("symbol", "")
+            price = float(t.get("fairPrice") or t.get("lastPrice") or 0)
+            if sym and price > 0:
+                prices[sym] = price
+    except requests.RequestException:
+        pass  # continue without prices — mark_price will be 0 and filtered by FundingData validator
 
-    next_funding_ts = _next_mexc_funding_ms()
+    # ── 3. Merge ───────────────────────────────────────────────────────────────
     results = []
-
-    for t in tickers:
-        raw_symbol = t.get("symbol", "")
+    for row in funding_rows:
+        raw_symbol = row.get("symbol", "")
         if "USDT" not in raw_symbol:
             continue
 
@@ -88,10 +74,12 @@ def fetch_funding_rates() -> List[FundingData]:
             continue
 
         try:
-            funding_rate = float(t.get("fundingRate") or 0)
-            mark_price = float(t.get("fairPrice") or t.get("lastPrice") or 0)
+            funding_rate  = float(row.get("fundingRate") or 0)
+            interval_hours = float(row.get("collectCycle") or 8)
+            next_settle_ts = int(row.get("nextSettleTime") or 0)  # already ms
+            mark_price     = prices.get(raw_symbol, 0.0)
 
-            annualized = funding_rate * (8760 / INTERVAL_HOURS) * 100
+            annualized = funding_rate * (8760 / interval_hours) * 100
 
             results.append(
                 FundingData(
@@ -101,8 +89,8 @@ def fetch_funding_rates() -> List[FundingData]:
                     funding_rate=funding_rate,
                     funding_rate_pct=funding_rate * 100,
                     mark_price=mark_price,
-                    next_funding_ts=next_funding_ts,
-                    interval_hours=INTERVAL_HOURS,
+                    next_funding_ts=next_settle_ts if next_settle_ts > 0 else None,
+                    interval_hours=interval_hours,
                     annualized_rate=annualized,
                 )
             )

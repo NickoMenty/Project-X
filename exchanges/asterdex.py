@@ -42,11 +42,27 @@ def _try_fetch(url: str) -> Optional[dict]:
         return None
 
 
+def _fetch_active_symbols() -> set:
+    """Return the set of symbols currently in TRADING status."""
+    for base in BASE_URLS:
+        result = _try_fetch(f"{base}/fapi/v1/exchangeInfo")
+        if result is not None:
+            return {
+                s["symbol"]
+                for s in result.get("symbols", [])
+                if s.get("status") == "TRADING"
+            }
+    return set()  # fail open
+
+
 def fetch_funding_rates() -> List[FundingData]:
     """
     Fetch all perpetual funding rates from AsterDex.
     Tries multiple base URLs for resilience.
+    Only includes contracts with status=TRADING (excludes SETTLING/PENDING_TRADING).
     """
+    active = _fetch_active_symbols()
+
     data = None
     for base in BASE_URLS:
         url = f"{base}/fapi/v1/premiumIndex"
@@ -68,6 +84,10 @@ def fetch_funding_rates() -> List[FundingData]:
     for t in data:
         raw_symbol = t.get("symbol", "")
         if not raw_symbol.endswith("USDT"):
+            continue
+
+        # Skip non-TRADING contracts (SETTLING, PENDING_TRADING)
+        if active and raw_symbol not in active:
             continue
 
         base_asset = _normalize_symbol(raw_symbol)

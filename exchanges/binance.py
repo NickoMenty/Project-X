@@ -21,11 +21,29 @@ def _normalize_symbol(raw: str) -> Optional[str]:
     return None
 
 
+def _fetch_active_symbols() -> set:
+    """Return the set of USDT-M perpetual symbols currently in TRADING status."""
+    try:
+        resp = requests.get(f"{BASE_URL}/fapi/v1/exchangeInfo", timeout=10)
+        resp.raise_for_status()
+        info = resp.json()
+        return {
+            s["symbol"]
+            for s in info.get("symbols", [])
+            if s.get("status") == "TRADING" and s.get("contractType") == "PERPETUAL"
+        }
+    except Exception:
+        return set()  # if this fails, don't filter (fail open)
+
+
 def fetch_funding_rates() -> List[FundingData]:
     """
     Fetch all USDT-M perpetual funding rates from Binance Futures.
-    No API key required for this endpoint.
+    Only includes contracts with status=TRADING (excludes SETTLING/delisted).
+    No API key required for these endpoints.
     """
+    active = _fetch_active_symbols()
+
     url = f"{BASE_URL}/fapi/v1/premiumIndex"
 
     try:
@@ -44,6 +62,10 @@ def fetch_funding_rates() -> List[FundingData]:
 
         # Only USDT-margined perpetuals
         if not raw_symbol.endswith("USDT"):
+            continue
+
+        # Skip contracts not actively trading (e.g. SETTLING, delisted)
+        if active and raw_symbol not in active:
             continue
 
         base = _normalize_symbol(raw_symbol)

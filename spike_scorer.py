@@ -333,10 +333,21 @@ def score_all_spikes(
     passing: List[SpikeOpportunity] = []
     failing: List[SpikeOpportunity] = []
 
+    # Deduplicate by (symbol, long_exchange, short_exchange) — both directions
+    # can produce identical assignments when both exchanges fire together.
+    # Keep the higher-scored entry for each unique trade direction.
+    seen: Dict[tuple, SpikeOpportunity] = {}
+
     for symbol, pr in records.items():
         for ep in pr.exchange_pairs:
             for opp in score_spike(symbol, ep):
-                (passing if opp.passes_all else failing).append(opp)
+                key = (opp.symbol, opp.long_exchange, opp.short_exchange)
+                existing = seen.get(key)
+                if existing is None or opp.score > existing.score:
+                    seen[key] = opp
+
+    for opp in seen.values():
+        (passing if opp.passes_all else failing).append(opp)
 
     passing.sort(key=lambda o: -o.score)
     failing.sort(key=lambda o: -o.funding_spread_pct)

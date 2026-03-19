@@ -49,16 +49,20 @@ def fetch_funding_rates() -> List[FundingData]:
         print(f"[{EXCHANGE_NAME}] Empty funding data")
         return []
 
-    # ── 2. Ticker for mark prices ──────────────────────────────────────────────
+    # ── 2. Ticker for mark prices and volume ──────────────────────────────────
     prices: dict = {}
+    volumes: dict = {}
     try:
         resp2 = requests.get(f"{BASE_URL}/api/v1/contract/ticker", timeout=10)
         resp2.raise_for_status()
         for t in resp2.json().get("data", []):
             sym = t.get("symbol", "")
             price = float(t.get("fairPrice") or t.get("lastPrice") or 0)
+            volume = float(t.get("volume24") or 0)
             if sym and price > 0:
                 prices[sym] = price
+            if sym:
+                volumes[sym] = volume
     except requests.RequestException:
         pass  # continue without prices — mark_price will be 0 and filtered by FundingData validator
 
@@ -71,6 +75,10 @@ def fetch_funding_rates() -> List[FundingData]:
 
         base_asset = _normalize_symbol(raw_symbol)
         if not base_asset:
+            continue
+
+        # Skip pairs with no trading activity
+        if volumes and volumes.get(raw_symbol, 0) == 0:
             continue
 
         try:

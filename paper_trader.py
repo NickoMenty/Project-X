@@ -35,7 +35,7 @@ from spike_scorer import SpikeOpportunity, POSITION_SIZE_USD
 
 # Seconds to wait after the funding epoch fires before simulating exit.
 # Gives the market a moment to settle post-funding.
-EXIT_WAIT_SECONDS: int = 10
+EXIT_WAIT_SECONDS: int = 0
 
 
 # ── Trade record ─────────────────────────────────────────────────────────────

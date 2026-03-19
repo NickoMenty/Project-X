@@ -88,8 +88,10 @@ def send_trade_report(trade: SimulatedTrade) -> None:
         f"  Size: ${trade.position_size_usd:.2f} per leg",
         "",
         f"<b>FUNDING EPOCH</b>  [{_ts(trade.funding_ts_ms / 1000)}]",
-        f"  Short {trade.short_exchange}  {trade.short_rate_pct:+.4f}%  →  ${trade.funding_collected_usd:+.4f}  (collected)",
-        f"  Long  {trade.long_exchange}   {trade.long_rate_pct:+.4f}%  →  ${trade.funding_paid_usd:+.4f}  (paid)",
+        f"  Short {trade.short_exchange}  {trade.short_rate_pct:+.4f}%  →  "
+        + (f"${trade.funding_collected_usd:+.4f}" if (trade.primary_is_short or trade.hedge_credits) else "not fired (hedge)"),
+        f"  Long  {trade.long_exchange}   {trade.long_rate_pct:+.4f}%  →  "
+        + (f"${trade.funding_paid_usd:+.4f}" if (not trade.primary_is_short or trade.hedge_credits) else "not fired (hedge)"),
         f"  Net funding: <b>${trade.net_funding_usd:+.4f}</b>",
         "",
         f"<b>EXIT</b>  [{_ts(trade.exit_ts)}]",

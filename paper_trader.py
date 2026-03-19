@@ -59,6 +59,10 @@ class SimulatedTrade:
     # Funding epoch timestamp
     funding_ts_ms: int
 
+    # Which leg is primary (fires for sure) and whether hedge also fires
+    primary_is_short: bool = True   # True → short_exchange is primary
+    hedge_credits: bool = False     # True → hedge leg's funding also counted
+
     # Entry (T-10s)
     entry_ts: float = 0.0
     entry_long_price: float = 0.0
@@ -100,6 +104,8 @@ def simulate_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> Simulated
         long_fee_pct=opportunity.long_fee_pct,
         short_fee_pct=opportunity.short_fee_pct,
         funding_ts_ms=event_ts_ms,
+        primary_is_short=opportunity.primary_is_short,
+        hedge_credits=opportunity.hedge_credits,
         entry_ts=time.time(),
         entry_long_price=opportunity.long_price,
         entry_short_price=opportunity.short_price,
@@ -128,10 +134,19 @@ def simulate_exit(
     trade.short_price_pnl_usd = size * short_pnl_pct / 100
 
     # ── Funding P&L ───────────────────────────────────────────────────────────
-    # Short leg: if rate > 0, shorts collect; if rate < 0, shorts pay.
-    # Long  leg: if rate > 0, longs pay;     if rate < 0, longs collect.
-    trade.funding_collected_usd =  size * trade.short_rate_pct / 100
-    trade.funding_paid_usd      = -size * trade.long_rate_pct  / 100  # negative = paid
+    # Primary leg always fires. Hedge leg only fires if hedge_credits=True.
+    # Short leg: rate>0 → shorts collect (+); rate<0 → shorts pay (-).
+    # Long  leg: rate>0 → longs pay (-);     rate<0 → longs collect (+).
+    short_funding_usd =  size * trade.short_rate_pct / 100
+    long_funding_usd  = -size * trade.long_rate_pct  / 100
+
+    if trade.primary_is_short:
+        trade.funding_collected_usd = short_funding_usd
+        trade.funding_paid_usd      = long_funding_usd if trade.hedge_credits else 0.0
+    else:
+        trade.funding_collected_usd = short_funding_usd if trade.hedge_credits else 0.0
+        trade.funding_paid_usd      = long_funding_usd
+
     trade.net_funding_usd = trade.funding_collected_usd + trade.funding_paid_usd
 
     # ── Fees ──────────────────────────────────────────────────────────────────
@@ -180,17 +195,26 @@ def print_trade_report(trade: SimulatedTrade) -> None:
     # ── Funding event ─────────────────────────────────────────────────────────
     epoch_str = _ts(trade.funding_ts_ms / 1000)
     print(f"\n  FUNDING EPOCH  [{epoch_str}]")
-    coll_color   = Fore.GREEN if trade.funding_collected_usd >= 0 else Fore.RED
-    paid_color   = Fore.RED   if trade.funding_paid_usd      <= 0 else Fore.GREEN
-    short_label  = "collected" if trade.short_rate_pct >= 0 else "paid"
-    long_label   = "paid"      if trade.long_rate_pct  >= 0 else "collected"
+    short_fires = trade.primary_is_short or trade.hedge_credits
+    long_fires  = (not trade.primary_is_short) or trade.hedge_credits
+
+    short_usd   =  size * trade.short_rate_pct / 100
+    long_usd    = -size * trade.long_rate_pct  / 100
+
+    def _leg_str(usd: float, fires: bool, label_pos: str, label_neg: str) -> str:
+        if not fires:
+            return f"{Fore.YELLOW}(not fired — hedge only){Style.RESET_ALL}"
+        color = Fore.GREEN if usd >= 0 else Fore.RED
+        label = label_pos if usd >= 0 else label_neg
+        return f"{color}{Style.BRIGHT}${usd:+.4f}{Style.RESET_ALL}  ({label})"
+
     print(
         f"    Short  {trade.short_exchange:<14}  rate: {trade.short_rate_pct:+.4f}%  "
-        f"→  {coll_color}{Style.BRIGHT}${trade.funding_collected_usd:+.4f}{Style.RESET_ALL}  ({short_label})"
+        f"→  {_leg_str(short_usd, short_fires, 'collected', 'paid')}"
     )
     print(
         f"    Long   {trade.long_exchange:<14}  rate: {trade.long_rate_pct:+.4f}%  "
-        f"→  {paid_color}{Style.BRIGHT}${trade.funding_paid_usd:+.4f}{Style.RESET_ALL}  ({long_label})"
+        f"→  {_leg_str(long_usd, long_fires, 'collected', 'paid')}"
     )
     print(f"    {'Net funding':38}  {_pnl_color(trade.net_funding_usd)}")
 

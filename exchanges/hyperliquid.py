@@ -69,6 +69,11 @@ def fetch_funding_rates() -> List[FundingData]:
             # funding is hourly rate as a decimal string e.g. "0.0000125"
             funding_rate = float(ctx.get("funding") or 0)
             mark_price = float(ctx.get("markPx") or ctx.get("midPx") or 0)
+            day_volume = float(ctx.get("dayNtlVlm") or 0)
+
+            # Skip assets with no trading activity (zero volume = effectively delisted)
+            if day_volume <= 0:
+                continue
 
             annualized = funding_rate * 8760 * 100  # hourly rate * hours in year
 

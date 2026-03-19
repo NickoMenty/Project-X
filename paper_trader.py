@@ -198,6 +198,7 @@ def print_trade_report(trade: SimulatedTrade) -> None:
     short_fires = trade.primary_is_short or trade.hedge_credits
     long_fires  = (not trade.primary_is_short) or trade.hedge_credits
 
+    size        = trade.position_size_usd
     short_usd   =  size * trade.short_rate_pct / 100
     long_usd    = -size * trade.long_rate_pct  / 100
 

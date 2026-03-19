@@ -371,10 +371,53 @@ def display_price_anomalies(records: Dict[str, PairRecord]):
 #  Main loop
 # ─────────────────────────────────────────────
 
+def _startup_check() -> None:
+    """
+    On first launch: fetch from every exchange, report per-exchange status
+    to both terminal and Telegram so the user knows what's reachable.
+    """
+    print(Style.BRIGHT + "\n  ── STARTUP CONNECTIVITY CHECK ──\n" + Style.RESET_ALL)
+    t0 = time.time()
+    results = {}
+    with ThreadPoolExecutor(max_workers=len(EXCHANGE_FETCHERS)) as executor:
+        futures = {executor.submit(fn): name for name, fn in EXCHANGE_FETCHERS.items()}
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                data = future.result(timeout=15)
+                results[name] = (True, len(data), None)
+                print(f"  {name:14s}  {Fore.GREEN}✓  {len(data)} pairs{Style.RESET_ALL}")
+            except Exception as e:
+                results[name] = (False, 0, str(e))
+                print(f"  {name:14s}  {Fore.RED}✗  {e}{Style.RESET_ALL}")
+
+    elapsed = time.time() - t0
+    ok  = [n for n, (s, _, _) in results.items() if s]
+    bad = [n for n, (s, _, _) in results.items() if not s]
+
+    print()
+    print(
+        f"  {Fore.GREEN}{len(ok)}/{len(results)} exchanges reachable{Style.RESET_ALL}"
+        + (f"  {Fore.RED}— FAILED: {', '.join(bad)}{Style.RESET_ALL}" if bad else "")
+        + f"  ({elapsed:.2f}s)"
+    )
+    print(Style.BRIGHT + "  ────────────────────────────────\n" + Style.RESET_ALL)
+
+    lines = ["<b>🔌 STARTUP CHECK</b>"]
+    for name, (success, count, err) in sorted(results.items()):
+        if success:
+            lines.append(f"  ✅ {name}  —  {count} pairs")
+        else:
+            lines.append(f"  ❌ {name}  —  {err}")
+    lines.append(f"\n<b>{len(ok)}/{len(results)} exchanges OK</b>  ({elapsed:.2f}s)")
+    send_alert("\n".join(lines))
+
+
 def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score: bool):
     export_info = None
     last_scanned_event: Optional[int] = None  # avoid double-scanning same epoch
-    send_alert("Started")
+    _startup_check()
+    send_alert("▶️ Started — monitoring funding rates")
 
     while True:
         os.system("cls" if os.name == "nt" else "clear")

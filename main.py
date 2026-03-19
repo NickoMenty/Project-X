@@ -425,7 +425,11 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
             try:
                 _run_pre_epoch_scan(next_event, min_exchanges, no_export, export_info)
             except Exception as e:
+                import traceback
+                err = traceback.format_exc()
                 print(f"  {Fore.RED}[Pre-scan] Failed: {e}{Style.RESET_ALL}")
+                print(err)
+                send_alert(f"❌ Pre-scan error:\n<code>{str(e)[:500]}</code>")
 
             last_scanned_event = next_event
 
@@ -561,10 +565,17 @@ def _run_pre_epoch_scan(
     # would mean no funding is collected at the 12:00 epoch.
     passing_now = [o for o in passing if o.seconds_to_funding <= 30.0]
     if not passing_now:
-        print(
-            f"\n  {Fore.YELLOW}No passing pairs have a joint funding event "
-            f"within 30s of this trigger — skipping trade.{Style.RESET_ALL}"
+        msg = (
+            f"⏭ Scan skipped trade — no passing pair has funding within 30s of this trigger.\n"
+            + "\n".join(
+                f"  {o.symbol} L:{o.long_exchange} S:{o.short_exchange} "
+                f"T-{o.seconds_to_funding:.0f}s"
+                for o in passing
+            )
         )
+        print(f"\n  {Fore.YELLOW}No passing pairs have a joint funding event "
+              f"within 30s of this trigger — skipping trade.{Style.RESET_ALL}")
+        send_alert(msg)
         return
 
     best = passing_now[0]
@@ -582,6 +593,11 @@ def _run_pre_epoch_scan(
 
     # Send imminent-only opportunities to Telegram right before trade entry
     send_spike_opportunities(passing_now, [], secs_to)
+    send_alert(
+        f"🚀 ENTERING TRADE  {best.symbol}  "
+        f"L:{best.long_exchange}  S:{best.short_exchange}  "
+        f"T-{secs_to:.0f}s  Score={best.score:+.4f}%"
+    )
 
     # ── T-10s: simulate entry ─────────────────────────────────────────────────
     wait_to_entry = max(0.0, (event_ts_ms - 10_000 - time.time() * 1000) / 1000)

@@ -167,7 +167,7 @@ def simulate_exit(
 # ── Report display ────────────────────────────────────────────────────────────
 
 def _ts(unix: float) -> str:
-    return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%H:%M:%S UTC")
+    return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%H:%M:%S.%f UTC")
 
 
 def _pnl_color(val: float) -> str:

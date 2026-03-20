@@ -69,12 +69,12 @@ class BitgetTrader(BaseTrader):
     def _load_lot_info(self, raw: str):
         if raw in self._step_cache:
             return
-        data = self._get("/api/v2/mix/market/instruments",
-                         {"productType": "USDT-FUTURES", "symbol": raw})
+        data = self._get("/api/v2/mix/market/contracts",
+                         {"productType": "usdt-futures", "symbol": raw})
         items = data if isinstance(data, list) else data.get("data", [])
         for item in items:
             if item.get("symbol") == raw:
-                self._step_cache[raw] = float(item.get("sizeIncrement", 1))
+                self._step_cache[raw] = float(item.get("sizeMultiplier") or item.get("sizeIncrement") or 1)
                 self._min_cache[raw] = float(item.get("minTradeNum", 1))
                 break
         if raw not in self._step_cache:
@@ -93,7 +93,7 @@ class BitgetTrader(BaseTrader):
     # ── BaseTrader ─────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        data = self._get("/api/v2/mix/account/accounts", {"productType": "USDT-FUTURES"})
+        data = self._get("/api/v2/mix/account/accounts", {"productType": "usdt-futures"})
         items = data if isinstance(data, list) else []
         for acct in items:
             if acct.get("marginCoin") == "USDT":
@@ -106,14 +106,14 @@ class BitgetTrader(BaseTrader):
             try:
                 self._post("/api/v2/mix/account/set-leverage", {
                     "symbol": raw,
-                    "productType": "USDT-FUTURES",
+                    "productType": "usdt-futures",
                     "marginCoin": "USDT",
                     "leverage": str(lev),
                     "holdSide": "long",
                 })
                 self._post("/api/v2/mix/account/set-leverage", {
                     "symbol": raw,
-                    "productType": "USDT-FUTURES",
+                    "productType": "usdt-futures",
                     "marginCoin": "USDT",
                     "leverage": str(lev),
                     "holdSide": "short",
@@ -139,7 +139,7 @@ class BitgetTrader(BaseTrader):
 
         payload = {
             "symbol": raw,
-            "productType": "USDT-FUTURES",
+            "productType": "usdt-futures",
             "marginMode": "isolated",
             "marginCoin": "USDT",
             "size": str(qty),

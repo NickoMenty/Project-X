@@ -102,7 +102,6 @@ class HyperliquidTrader(BaseTrader):
     # ── EIP-712 signing ────────────────────────────────────────────────────────
 
     def _sign_action(self, action: dict, nonce: int) -> dict:
-        from eth_account.structured_data import encode_structured_data
         import eth_account
 
         # Hyperliquid uses a simplified signing: keccak256 of (action_hash, nonce, vault_address)

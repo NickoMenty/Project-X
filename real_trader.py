@@ -415,8 +415,8 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
 
 # ── Order connectivity test ───────────────────────────────────────────────────
 
-TEST_ORDER_NOTIONAL = 11.0   # USD notional for the round-trip connectivity test
-TEST_ORDER_SYMBOL   = "BTC"  # Liquid on all supported exchanges
+TEST_ORDER_NOTIONAL = 30.0   # USD notional for the round-trip connectivity test
+TEST_ORDER_SYMBOL   = "ETH"  # ETH ~$2500: $30 ≈ 0.012 ETH, above min qty on all exchanges
 
 
 def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bool, str]]:
@@ -445,7 +445,6 @@ def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bo
             continue
 
         try:
-            trader.set_leverage(TEST_ORDER_SYMBOL, 1)
             entry = trader.open_long(TEST_ORDER_SYMBOL, TEST_ORDER_NOTIONAL, mark_price, 1)
             if not entry.success:
                 results[name] = (False, f"open failed: {entry.error}")

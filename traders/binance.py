@@ -82,7 +82,9 @@ class BinanceTrader(BaseTrader):
             try:
                 self._req("POST", "/fapi/v1/leverage", {"symbol": raw, "leverage": lev})
                 return lev
-            except RuntimeError:
+            except RuntimeError as e:
+                if "-4028" in str(e):   # "No need to change leverage" — already set
+                    return lev
                 continue
         raise RuntimeError(f"Binance: could not set leverage for {raw}")
 

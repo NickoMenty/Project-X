@@ -92,9 +92,18 @@ class BybitTrader(BaseTrader):
             try:
                 result = self._get("/v5/account/wallet-balance", {"accountType": account_type})
                 for acct in result.get("list", []):
+                    # Try account-level total first
+                    total = float(acct.get("totalWalletBalance") or acct.get("totalEquity") or 0)
+                    if total > 0:
+                        return total
+                    # Fall back to per-coin
                     for coin in acct.get("coin", []):
                         if coin.get("coin") == "USDT":
-                            val = float(coin.get("availableToWithdraw") or coin.get("walletBalance") or 0)
+                            val = float(
+                                coin.get("equity") or
+                                coin.get("walletBalance") or
+                                coin.get("availableToWithdraw") or 0
+                            )
                             if val > 0:
                                 return val
             except Exception:

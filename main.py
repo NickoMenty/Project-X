@@ -384,15 +384,18 @@ def _startup_check() -> None:
     print(Style.BRIGHT + "\n  ── STARTUP CONNECTIVITY CHECK ──\n" + Style.RESET_ALL)
     t0 = time.time()
     results = {}
+    all_data: Dict[str, list] = {}
     with ThreadPoolExecutor(max_workers=len(EXCHANGE_FETCHERS)) as executor:
         futures = {executor.submit(fn): name for name, fn in EXCHANGE_FETCHERS.items()}
         for future in as_completed(futures):
             name = futures[future]
             try:
                 data = future.result(timeout=15)
+                all_data[name] = data
                 results[name] = (True, len(data), None)
                 print(f"  {name:14s}  {Fore.GREEN}✓  {len(data)} pairs{Style.RESET_ALL}")
             except Exception as e:
+                all_data[name] = []
                 results[name] = (False, 0, str(e))
                 print(f"  {name:14s}  {Fore.RED}✗  {e}{Style.RESET_ALL}")
 

@@ -259,6 +259,7 @@ def _score_with_primary(symbol: str, ep: ExchangePair, use_a_as_primary: bool) -
         price_spread_pct = abs(long_price - short_price) / min(long_price, short_price) * 100.0
     else:
         price_spread_pct = 0.0
+        fail_reasons.append(f"missing price data (long={long_price}, short={short_price})")
 
     if price_spread_pct >= MAX_PRICE_SPREAD_PCT:
         fail_reasons.append(

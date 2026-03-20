@@ -250,6 +250,9 @@ def real_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> RealTrade:
     trade.leverage_used = leverage_used
 
     if DRY_RUN:
+        if not opportunity.long_price or not opportunity.short_price:
+            trade.error = f"Cannot enter: missing price (long={opportunity.long_price}, short={opportunity.short_price})"
+            return trade
         print(f"  [DRY-RUN] Would open LONG  {opportunity.long_exchange}  {opportunity.symbol}"
               f"  ${POSITION_SIZE_USD} @ {lev_long}x  price≈{opportunity.long_price:.4f}")
         print(f"  [DRY-RUN] Would open SHORT {opportunity.short_exchange}  {opportunity.symbol}"

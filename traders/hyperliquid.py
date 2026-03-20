@@ -48,8 +48,11 @@ class HyperliquidTrader(BaseTrader):
         self._asset_cache: Dict[str, int] = {}   # symbol → asset index
         self._sz_decimals: Dict[str, int] = {}   # symbol → size decimals
 
-        # API wallet trades on behalf of a main account — resolve the parent address
-        self.address = self._resolve_main_account()
+        # API wallet trades on behalf of a main account — resolve the parent address.
+        # If HYPERLIQUID_ADDRESS is set in env, use it directly (most reliable).
+        import os
+        explicit = os.getenv("HYPERLIQUID_ADDRESS", "").strip()
+        self.address = explicit if explicit else self._resolve_main_account()
 
     def fmt_symbol(self, symbol: str) -> str:
         return symbol  # Hyperliquid uses bare symbols like "BTC"

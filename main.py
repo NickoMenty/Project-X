@@ -41,6 +41,7 @@ from real_trader import (
     real_entry, real_exit, print_trade_report,
     EXIT_WAIT_SECONDS, DRY_RUN,
     init_traders, fetch_all_balances,
+    _traders,
 )
 from session_log import SessionLog
 from telegram_reporter import send_trade_report, send_spike_opportunities, send_alert

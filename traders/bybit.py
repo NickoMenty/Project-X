@@ -56,6 +56,7 @@ class BybitTrader(BaseTrader):
             "X-BAPI-RECV-WINDOW": RECV_WINDOW,
             "Content-Type": "application/json",
             "Cache-Control": "no-cache",
+            "User-Agent": "Mozilla/5.0",
         }
 
     def _post(self, path: str, payload: dict) -> dict:

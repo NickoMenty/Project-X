@@ -101,27 +101,24 @@ class BybitTrader(BaseTrader):
     # ── BaseTrader ─────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        # Try UNIFIED first (modern accounts), fall back to CONTRACT (classic)
-        for account_type in ["UNIFIED", "CONTRACT"]:
-            try:
-                result = self._get("/v5/account/wallet-balance", {"accountType": account_type})
-                for acct in result.get("list", []):
-                    # Try account-level total first
-                    total = float(acct.get("totalWalletBalance") or acct.get("totalEquity") or 0)
-                    if total > 0:
-                        return total
-                    # Fall back to per-coin
-                    for coin in acct.get("coin", []):
-                        if coin.get("coin") == "USDT":
-                            val = float(
-                                coin.get("equity") or
-                                coin.get("walletBalance") or
-                                coin.get("availableToWithdraw") or 0
-                            )
+        result = self._get("/v5/account/wallet-balance", {"accountType": "UNIFIED"})
+        for acct in result.get("list", []):
+            # Account-level totals (most reliable)
+            for field in ("totalWalletBalance", "totalEquity", "totalMarginBalance"):
+                raw = acct.get(field)
+                if raw:
+                    val = float(raw)
+                    if val > 0:
+                        return val
+            # Per-coin fallback
+            for coin in acct.get("coin", []):
+                if coin.get("coin") == "USDT":
+                    for cfield in ("walletBalance", "equity", "usdValue"):
+                        raw = coin.get(cfield)
+                        if raw:
+                            val = float(raw)
                             if val > 0:
                                 return val
-            except Exception:
-                continue
         return 0.0
 
     def set_leverage(self, symbol: str, leverage: int) -> int:

@@ -37,10 +37,12 @@ from exporter import export_snapshot, get_history_stats
 from spike_scorer import (
     score_all_spikes, SpikeOpportunity, POSITION_SIZE_USD,
 )
-from paper_trader import (
-    simulate_entry, simulate_exit, print_trade_report,
-    EXIT_WAIT_SECONDS,
+from real_trader import (
+    real_entry, real_exit, print_trade_report,
+    EXIT_WAIT_SECONDS, DRY_RUN,
+    init_traders, fetch_all_balances,
 )
+from session_log import SessionLog
 from telegram_reporter import send_trade_report, send_spike_opportunities, send_alert
 
 init(autoreset=True)
@@ -413,11 +415,31 @@ def _startup_check() -> None:
     send_alert("\n".join(lines))
 
 
+_session_log: Optional[SessionLog] = None
+
+
 def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score: bool):
+    global _session_log
     export_info = None
     last_scanned_event: Optional[int] = None  # avoid double-scanning same epoch
+
+    # ── Startup: connectivity + trader init ───────────────────────────────────
     _startup_check()
-    send_alert("▶️ Started — monitoring funding rates")
+
+    print(Style.BRIGHT + "\n  ── INITIALISING EXCHANGE TRADERS ──\n" + Style.RESET_ALL)
+    init_traders()
+
+    print(Style.BRIGHT + "\n  ── FETCHING OPENING BALANCES ──\n" + Style.RESET_ALL)
+    balances = fetch_all_balances()
+    _session_log = SessionLog()
+    _session_log.update_balances(balances)
+    bal_lines = "  ".join(f"{ex}: ${b:.2f}" for ex, b in balances.items() if b)
+    print(f"  {bal_lines}\n")
+    send_alert(
+        "▶️ Started — monitoring funding rates\n"
+        + ("🔒 DRY-RUN mode (no real orders)\n" if DRY_RUN else "💰 LIVE trading active\n")
+        + "\n".join(f"  {ex}: ${b:.2f}" for ex, b in balances.items())
+    )
 
     while True:
         os.system("cls" if os.name == "nt" else "clear")
@@ -651,17 +673,22 @@ def _run_pre_epoch_scan(
     secs_to = max(0.0, (event_ts_ms - time.time() * 1000) / 1000)
     ts_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     print()
+    mode_tag = "[DRY-RUN]" if DRY_RUN else "[LIVE]"
     print(Fore.GREEN + Style.BRIGHT + "─" * 110 + Style.RESET_ALL)
     print(
         Fore.GREEN + Style.BRIGHT +
-        f"  [SIM] ENTRY  |  {ts_str}  |  T-{secs_to:.0f}s  |  "
+        f"  {mode_tag} ENTRY  |  {ts_str}  |  T-{secs_to:.0f}s  |  "
         f"{best.symbol}  L:{best.long_exchange} @ ${best.long_price:,.4f}  "
         f"S:{best.short_exchange} @ ${best.short_price:,.4f}"
         + Style.RESET_ALL
     )
     print(Fore.GREEN + Style.BRIGHT + "─" * 110 + Style.RESET_ALL)
 
-    trade = simulate_entry(best, event_ts_ms)
+    trade = real_entry(best, event_ts_ms)
+
+    if trade.error:
+        send_alert(f"❌ Entry error for {best.symbol}:\n{trade.error}")
+        return
 
     # ── Wait for funding epoch + exit window ──────────────────────────────────
     wait_to_exit = max(0.0, (event_ts_ms + EXIT_WAIT_SECONDS * 1000 - time.time() * 1000) / 1000)
@@ -676,7 +703,7 @@ def _run_pre_epoch_scan(
     print()
     print(
         Fore.CYAN + Style.BRIGHT +
-        f"  [SIM] EXIT FETCH  |  {ts_str}  |  fetching exit prices..."
+        f"  {mode_tag} EXIT FETCH  |  {ts_str}  |  fetching exit prices..."
         + Style.RESET_ALL
     )
     exit_all_data, _, _, _, _ = _fetch_and_build(min_exchanges, no_export=True, export_info=None)
@@ -685,9 +712,25 @@ def _run_pre_epoch_scan(
     exit_long_price  = _extract_price(exit_all_data, best.symbol, best.long_exchange,  best.long_price)
     exit_short_price = _extract_price(exit_all_data, best.symbol, best.short_exchange, best.short_price)
 
-    simulate_exit(trade, exit_long_price, exit_short_price)
+    real_exit(trade, exit_long_price, exit_short_price)
     print_trade_report(trade)
     send_trade_report(trade)
+
+    # ── Session log ───────────────────────────────────────────────────────────
+    if _session_log is not None:
+        post_balances = fetch_all_balances()
+        _session_log.record_trade(
+            symbol=trade.symbol,
+            long_exchange=trade.long_exchange,
+            short_exchange=trade.short_exchange,
+            position_size_usd=trade.position_size_usd,
+            leverage=trade.leverage_used,
+            price_pnl_usd=trade.long_price_pnl_usd + trade.short_price_pnl_usd,
+            funding_pnl_usd=trade.net_funding_usd,
+            fees_usd=trade.total_fee_usd,
+            net_pnl_usd=trade.net_pnl_usd,
+            post_balances=post_balances,
+        )
 
 
 def _extract_price(

@@ -23,9 +23,8 @@ from typing import Optional
 import requests
 from dotenv import load_dotenv
 
-from paper_trader import SimulatedTrade
 from spike_scorer import SpikeOpportunity
-from typing import List
+from typing import List, Any
 
 load_dotenv()
 
@@ -60,7 +59,7 @@ def _send(text: str) -> None:
             pass  # never crash the main loop over a Telegram failure
 
 
-def send_trade_report(trade: SimulatedTrade) -> None:
+def send_trade_report(trade: Any) -> None:
     """
     Format and send a completed SimulatedTrade report to Telegram.
     Safe to call even when Telegram is not configured — does nothing.
@@ -80,7 +79,7 @@ def send_trade_report(trade: SimulatedTrade) -> None:
     price_combined = trade.long_price_pnl_usd + trade.short_price_pnl_usd
 
     lines = [
-        f"<b>[SIM] PAPER TRADE — {trade.symbol}</b>",
+        f"<b>{'[DRY-RUN]' if getattr(trade, 'dry_run', False) else '[LIVE]'} TRADE — {trade.symbol}</b>",
         "",
         f"<b>ENTRY</b>  [{_ts(trade.entry_ts)}]",
         f"  Long   <code>{trade.long_exchange}</code>  ${trade.entry_long_price:,.4f}",

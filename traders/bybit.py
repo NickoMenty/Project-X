@@ -87,11 +87,18 @@ class BybitTrader(BaseTrader):
     # ── BaseTrader ─────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        result = self._get("/v5/account/wallet-balance", {"accountType": "CONTRACT"})
-        for acct in result.get("list", []):
-            for coin in acct.get("coin", []):
-                if coin.get("coin") == "USDT":
-                    return float(coin.get("availableToWithdraw", 0))
+        # Try UNIFIED first (modern accounts), fall back to CONTRACT (classic)
+        for account_type in ["UNIFIED", "CONTRACT"]:
+            try:
+                result = self._get("/v5/account/wallet-balance", {"accountType": account_type})
+                for acct in result.get("list", []):
+                    for coin in acct.get("coin", []):
+                        if coin.get("coin") == "USDT":
+                            val = float(coin.get("availableToWithdraw") or coin.get("walletBalance") or 0)
+                            if val > 0:
+                                return val
+            except Exception:
+                continue
         return 0.0
 
     def set_leverage(self, symbol: str, leverage: int) -> int:

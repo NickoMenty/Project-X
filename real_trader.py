@@ -154,8 +154,11 @@ def init_traders():
     _try("AsterDex", lambda: AsterDexTrader(
         os.environ["ASTER_KEY"], os.environ["ASTER_SECRET"]))
 
-    _try("Hyperliquid", lambda: HyperliquidTrader(
-        os.environ["HYPERLIQUID_API"]))
+    try:
+        import eth_account  # noqa
+        _try("Hyperliquid", lambda: HyperliquidTrader(os.environ["HYPERLIQUID_API"]))
+    except ImportError:
+        print(f"  {'Hyperliquid':14s} {Fore.YELLOW}⚠ eth-account not installed — run: pip install eth-account{Style.RESET_ALL}")
 
     _traders.update(loaded)
     return loaded
@@ -180,12 +183,15 @@ def fetch_all_balances() -> Dict[str, float]:
     for t in threads: t.start()
     for t in threads: t.join()
 
-    # Print results so failures are visible
-    for name, bal in balances.items():
-        if name in errors:
-            print(f"  {name:14s} {Fore.RED}✗ balance fetch failed: {errors[name]}{Style.RESET_ALL}")
+    # Print results — include exchanges that failed to init too
+    from session_log import EXCHANGES
+    for name in EXCHANGES:
+        if name not in _traders:
+            print(f"  {name:14s} {Fore.YELLOW}⚠ trader not initialised{Style.RESET_ALL}")
+        elif name in errors:
+            print(f"  {name:14s} {Fore.RED}✗ {errors[name]}{Style.RESET_ALL}")
         else:
-            print(f"  {name:14s} {Fore.GREEN}${bal:.2f}{Style.RESET_ALL}")
+            print(f"  {name:14s} {Fore.GREEN}${balances.get(name, 0):.2f}{Style.RESET_ALL}")
 
     return balances
 

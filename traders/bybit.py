@@ -68,15 +68,25 @@ class BybitTrader(BaseTrader):
             raise RuntimeError(f"Bybit {data.get('retCode')}: {data.get('retMsg')}")
         return data.get("result", {})
 
-    def _get(self, path: str, params: dict) -> dict:
-        ts = self._now_ms()
-        qs = "&".join(f"{k}={v}" for k, v in params.items())
-        sig = self._sign_get(ts, qs)
-        resp = requests.get(f"{BASE}{path}?{qs}", headers=self._headers(ts, sig), timeout=10)
-        data = resp.json()
-        if data.get("retCode", 0) != 0:
-            raise RuntimeError(f"Bybit {data.get('retCode')}: {data.get('retMsg')}")
-        return data.get("result", {})
+    def _get(self, path: str, params: dict, retries: int = 3) -> dict:
+        last_err = None
+        for attempt in range(retries):
+            try:
+                ts = self._now_ms()
+                qs = "&".join(f"{k}={v}" for k, v in params.items())
+                sig = self._sign_get(ts, qs)
+                resp = requests.get(f"{BASE}{path}?{qs}", headers=self._headers(ts, sig), timeout=10)
+                if not resp.text:
+                    raise RuntimeError("Empty response body")
+                data = resp.json()
+                if data.get("retCode", 0) != 0:
+                    raise RuntimeError(f"Bybit {data.get('retCode')}: {data.get('retMsg')}")
+                return data.get("result", {})
+            except Exception as e:
+                last_err = e
+                if attempt < retries - 1:
+                    time.sleep(0.5)
+        raise RuntimeError(f"Bybit GET {path} failed after {retries} attempts: {last_err}")
 
     # ── Instrument info ────────────────────────────────────────────────────────
 

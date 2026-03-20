@@ -12,7 +12,7 @@ from typing import Dict, Optional
 from .base import BaseTrader, TradeResult
 
 BASE = "https://api.bybit.com"
-RECV_WINDOW = "5000"
+RECV_WINDOW = "10000"
 
 
 class BybitTrader(BaseTrader):
@@ -23,6 +23,20 @@ class BybitTrader(BaseTrader):
         self.secret = api_secret
         self._step_cache: Dict[str, float] = {}
         self._min_cache: Dict[str, float] = {}
+        self._time_offset_ms: int = 0
+        self._sync_time()
+
+    def _sync_time(self):
+        """Calculate clock offset vs Bybit server time."""
+        try:
+            resp = requests.get(f"{BASE}/v5/market/time", timeout=5).json()
+            server_ms = int(resp["result"]["timeNano"]) // 1_000_000
+            self._time_offset_ms = server_ms - int(time.time() * 1000)
+        except Exception:
+            self._time_offset_ms = 0
+
+    def _now_ms(self) -> str:
+        return str(int(time.time() * 1000) + self._time_offset_ms)
 
     # ── Auth ───────────────────────────────────────────────────────────────────
 
@@ -44,7 +58,7 @@ class BybitTrader(BaseTrader):
         }
 
     def _post(self, path: str, payload: dict) -> dict:
-        ts = str(int(time.time() * 1000))
+        ts = self._now_ms()
         body = json.dumps(payload)
         sig = self._sign_post(ts, body)
         resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, sig),
@@ -55,7 +69,7 @@ class BybitTrader(BaseTrader):
         return data.get("result", {})
 
     def _get(self, path: str, params: dict) -> dict:
-        ts = str(int(time.time() * 1000))
+        ts = self._now_ms()
         qs = "&".join(f"{k}={v}" for k, v in params.items())
         sig = self._sign_get(ts, qs)
         resp = requests.get(f"{BASE}{path}?{qs}", headers=self._headers(ts, sig), timeout=10)

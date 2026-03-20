@@ -413,6 +413,62 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
     return trade
 
 
+# ── Order connectivity test ───────────────────────────────────────────────────
+
+TEST_ORDER_NOTIONAL = 11.0   # USD notional for the round-trip connectivity test
+TEST_ORDER_SYMBOL   = "BTC"  # Liquid on all supported exchanges
+
+
+def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bool, str]]:
+    """
+    For each initialised trader, open an $11 long and immediately close it.
+    Used at startup to verify API keys have order-placement permission.
+
+    Only runs in LIVE mode — returns an empty dict when DRY_RUN is True.
+    Returns {exchange: (success, message)}.
+    """
+    if DRY_RUN:
+        return {}
+
+    results: Dict[str, Tuple[bool, str]] = {}
+
+    for name, trader in _traders.items():
+        # Find mark price for BTC from the already-fetched rate data
+        mark_price = 0.0
+        for fd in all_data.get(name, []):
+            if fd.symbol == TEST_ORDER_SYMBOL and fd.mark_price and fd.mark_price > 0:
+                mark_price = fd.mark_price
+                break
+
+        if mark_price <= 0:
+            results[name] = (False, f"no {TEST_ORDER_SYMBOL} price from {name} — skipped")
+            continue
+
+        try:
+            trader.set_leverage(TEST_ORDER_SYMBOL, 1)
+            entry = trader.open_long(TEST_ORDER_SYMBOL, TEST_ORDER_NOTIONAL, mark_price, 1)
+            if not entry.success:
+                results[name] = (False, f"open failed: {entry.error}")
+                continue
+            close = trader.close_long(TEST_ORDER_SYMBOL, entry.qty)
+            if not close.success:
+                results[name] = (
+                    False,
+                    f"⚠️ OPEN OK (qty={entry.qty:.6f}) but CLOSE FAILED: {close.error} — "
+                    f"manual close required on {name}"
+                )
+            else:
+                results[name] = (
+                    True,
+                    f"open {entry.qty:.6f} @ ${entry.fill_price:,.2f}  →  "
+                    f"close @ ${close.fill_price:,.2f}"
+                )
+        except Exception as e:
+            results[name] = (False, str(e))
+
+    return results
+
+
 # ── Report ────────────────────────────────────────────────────────────────────
 
 def _ts(unix: float) -> str:

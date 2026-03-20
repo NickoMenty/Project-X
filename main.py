@@ -42,6 +42,7 @@ from real_trader import (
     EXIT_WAIT_SECONDS, DRY_RUN,
     init_traders, fetch_all_balances,
     _traders, TARGET_LEVERAGE,
+    run_order_connectivity_test,
 )
 from session_log import SessionLog
 from telegram_reporter import send_trade_report, send_spike_opportunities, send_alert
@@ -415,6 +416,7 @@ def _startup_check() -> None:
             lines.append(f"  ❌ {name}  —  {err}")
     lines.append(f"\n<b>{len(ok)}/{len(results)} exchanges OK</b>  ({elapsed:.2f}s)")
     send_alert("\n".join(lines))
+    return all_data
 
 
 _session_log: Optional[SessionLog] = None
@@ -426,10 +428,24 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     last_scanned_event: Optional[int] = None  # avoid double-scanning same epoch
 
     # ── Startup: connectivity + trader init ───────────────────────────────────
-    _startup_check()
+    startup_data = _startup_check()
 
     print(Style.BRIGHT + "\n  ── INITIALISING EXCHANGE TRADERS ──\n" + Style.RESET_ALL)
     init_traders()
+
+    if not DRY_RUN:
+        print(Style.BRIGHT + "\n  ── ORDER CONNECTIVITY TEST ($11 BTC long → close) ──\n" + Style.RESET_ALL)
+        test_results = run_order_connectivity_test(startup_data)
+        tg_lines = ["<b>🧪 ORDER CONNECTIVITY TEST</b>  ($11 BTC long → close)"]
+        for ex, (ok, msg) in test_results.items():
+            icon = "✅" if ok else "❌"
+            status = Fore.GREEN + "✓" + Style.RESET_ALL if ok else Fore.RED + "✗" + Style.RESET_ALL
+            print(f"  {ex:14s}  {status}  {msg}")
+            tg_lines.append(f"  {icon} {ex}  —  {msg}")
+        if not test_results:
+            print(f"  {Fore.YELLOW}(skipped — no traders initialised){Style.RESET_ALL}")
+        send_alert("\n".join(tg_lines))
+        print()
 
     print(Style.BRIGHT + "\n  ── FETCHING OPENING BALANCES ──\n" + Style.RESET_ALL)
     balances = fetch_all_balances()

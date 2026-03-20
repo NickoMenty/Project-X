@@ -171,9 +171,18 @@ class HyperliquidTrader(BaseTrader):
     # ── BaseTrader ─────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        data = self._info({"type": "clearinghouseState", "user": self.address})
-        margin_summary = data.get("marginSummary", {})
-        return float(margin_summary.get("accountValue", 0))
+        # Check perps account first
+        perps = self._info({"type": "clearinghouseState", "user": self.address})
+        perps_val = float(perps.get("marginSummary", {}).get("accountValue", 0))
+        if perps_val > 0:
+            return perps_val
+
+        # Fall back to spot account (USDC)
+        spot = self._info({"type": "spotClearinghouseState", "user": self.address})
+        for bal in spot.get("balances", []):
+            if bal.get("coin") == "USDC":
+                return float(bal.get("total", 0))
+        return 0.0
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
         asset = self._asset_index(symbol)

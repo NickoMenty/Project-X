@@ -196,6 +196,8 @@ def fetch_all_balances() -> Dict[str, object]:
         else:
             print(f"  {name:14s} {Fore.GREEN}${balances.get(name, 0):.2f}{Style.RESET_ALL}")
 
+    # Store errors so callers can show them in TG
+    balances["_errors"] = errors
     return balances
 
 

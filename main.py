@@ -434,11 +434,14 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     _session_log = SessionLog()
     _session_log.update_balances({k: v for k, v in balances.items() if v is not None})
 
+    _errors = balances.get("_errors", {})
+
     def _bal_line(ex, val):
-        if val is None:
-            return f"  ❌ {ex}: fetch failed"
-        if ex not in balances:
+        if ex not in _traders:
             return f"  ⚠️ {ex}: not initialised"
+        if val is None:
+            err = _errors.get(ex, "unknown error")
+            return f"  ❌ {ex}: {err}"
         return f"  ✅ {ex}: ${val:.2f}"
 
     send_alert(

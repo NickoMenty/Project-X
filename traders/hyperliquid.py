@@ -44,14 +44,32 @@ class HyperliquidTrader(BaseTrader):
         if not private_key.startswith("0x"):
             private_key = "0x" + private_key
         self._account = Account.from_key(private_key)
-        self.address = self._account.address
+        self.api_wallet_address = self._account.address
         self._asset_cache: Dict[str, int] = {}   # symbol → asset index
         self._sz_decimals: Dict[str, int] = {}   # symbol → size decimals
+
+        # API wallet trades on behalf of a main account — resolve the parent address
+        self.address = self._resolve_main_account()
 
     def fmt_symbol(self, symbol: str) -> str:
         return symbol  # Hyperliquid uses bare symbols like "BTC"
 
     # ── Info helpers ───────────────────────────────────────────────────────────
+
+    def _resolve_main_account(self) -> str:
+        """Look up the main (parent) account address this API wallet is authorized for."""
+        try:
+            data = requests.post(INFO_URL, json={
+                "type": "agentState",
+                "user": self.api_wallet_address,
+            }, timeout=10).json()
+            parent = data.get("parentAccount") or data.get("parent")
+            if parent:
+                return parent
+        except Exception:
+            pass
+        # Fall back to the API wallet address itself (works if using main wallet key)
+        return self.api_wallet_address
 
     def _info(self, payload: dict) -> dict:
         resp = requests.post(INFO_URL, json=payload, timeout=10)

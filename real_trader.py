@@ -269,15 +269,25 @@ def real_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> RealTrade:
                                       opportunity.short_price, POSITION_SIZE_USD, lev_short)
         return trade
 
+    from traders.base import TradeResult as TR
+
     def _open_long():
         nonlocal long_result
-        long_result = long_trader.open_long(
-            opportunity.symbol, POSITION_SIZE_USD, opportunity.long_price, lev_long)
+        try:
+            long_result = long_trader.open_long(
+                opportunity.symbol, POSITION_SIZE_USD, opportunity.long_price, lev_long)
+        except Exception as e:
+            long_result = TR(opportunity.long_exchange, opportunity.symbol,
+                             opportunity.symbol + "USDT", "buy", 0, 0, 0, lev_long, error=str(e))
 
     def _open_short():
         nonlocal short_result
-        short_result = short_trader.open_short(
-            opportunity.symbol, POSITION_SIZE_USD, opportunity.short_price, lev_short)
+        try:
+            short_result = short_trader.open_short(
+                opportunity.symbol, POSITION_SIZE_USD, opportunity.short_price, lev_short)
+        except Exception as e:
+            short_result = TR(opportunity.short_exchange, opportunity.symbol,
+                              opportunity.symbol + "USDT", "sell", 0, 0, 0, lev_short, error=str(e))
 
     t1 = threading.Thread(target=_open_long)
     t2 = threading.Thread(target=_open_short)
@@ -287,10 +297,28 @@ def real_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> RealTrade:
     trade.long_entry_result = long_result
     trade.short_entry_result = short_result
 
-    if long_result and not long_result.success:
-        trade.error = f"Long entry failed: {long_result.error}"
-    if short_result and not short_result.success:
-        trade.error += f" | Short entry failed: {short_result.error}"
+    long_ok  = long_result  and long_result.success
+    short_ok = short_result and short_result.success
+
+    if not long_ok:
+        trade.error = f"Long entry failed ({opportunity.long_exchange}): {long_result.error if long_result else 'no response'}"
+    if not short_ok:
+        trade.error += f"{' | ' if trade.error else ''}Short entry failed ({opportunity.short_exchange}): {short_result.error if short_result else 'no response'}"
+
+    # Partial fill: one leg opened, the other didn't — close the opened leg immediately
+    # to avoid a naked directional exposure.
+    if long_ok and not short_ok:
+        print(f"  {Fore.RED}[PARTIAL ENTRY] Short leg failed — closing long on {opportunity.long_exchange} to flatten{Style.RESET_ALL}")
+        try:
+            long_trader.close_long(opportunity.symbol, long_result.qty)
+        except Exception as e:
+            trade.error += f" | EMERGENCY CLOSE FAILED: {e}"
+    elif short_ok and not long_ok:
+        print(f"  {Fore.RED}[PARTIAL ENTRY] Long leg failed — closing short on {opportunity.short_exchange} to flatten{Style.RESET_ALL}")
+        try:
+            short_trader.close_short(opportunity.symbol, short_result.qty)
+        except Exception as e:
+            trade.error += f" | EMERGENCY CLOSE FAILED: {e}"
 
     return trade
 
@@ -320,13 +348,23 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
         short_exit = TR(trade.short_exchange, trade.symbol, trade.symbol + "USDT", "buy",
                         trade.short_qty, exit_short_price, trade.short_qty * exit_short_price, 1)
     else:
+        from traders.base import TradeResult as TR
+
         def _close_long():
             nonlocal long_exit
-            long_exit = long_trader.close_long(trade.symbol, trade.long_qty)
+            try:
+                long_exit = long_trader.close_long(trade.symbol, trade.long_qty)
+            except Exception as e:
+                long_exit = TR(trade.long_exchange, trade.symbol,
+                               trade.symbol + "USDT", "sell", 0, 0, 0, 1, error=str(e))
 
         def _close_short():
             nonlocal short_exit
-            short_exit = short_trader.close_short(trade.symbol, trade.short_qty)
+            try:
+                short_exit = short_trader.close_short(trade.symbol, trade.short_qty)
+            except Exception as e:
+                short_exit = TR(trade.short_exchange, trade.symbol,
+                                trade.symbol + "USDT", "buy", 0, 0, 0, 1, error=str(e))
 
         t1 = threading.Thread(target=_close_long)
         t2 = threading.Thread(target=_close_short)

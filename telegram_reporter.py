@@ -75,8 +75,10 @@ def send_trade_report(trade: Any) -> None:
     def _ts(unix: float) -> str:
         return datetime.fromtimestamp(unix, tz=timezone.utc).strftime("%H:%M:%S.%f UTC")
 
-    long_pct  = (trade.exit_long_price  - trade.entry_long_price)  / trade.entry_long_price  * 100
-    short_pct = (trade.entry_short_price - trade.exit_short_price) / trade.entry_short_price * 100
+    long_pct  = ((trade.exit_long_price  - trade.entry_long_price)  / trade.entry_long_price  * 100
+                 if trade.entry_long_price  else 0.0)
+    short_pct = ((trade.entry_short_price - trade.exit_short_price) / trade.entry_short_price * 100
+                 if trade.entry_short_price else 0.0)
     price_combined = trade.long_price_pnl_usd + trade.short_price_pnl_usd
 
     lines = [

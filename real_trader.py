@@ -180,6 +180,13 @@ def fetch_all_balances() -> Dict[str, float]:
     for t in threads: t.start()
     for t in threads: t.join()
 
+    # Print results so failures are visible
+    for name, bal in balances.items():
+        if name in errors:
+            print(f"  {name:14s} {Fore.RED}✗ balance fetch failed: {errors[name]}{Style.RESET_ALL}")
+        else:
+            print(f"  {name:14s} {Fore.GREEN}${bal:.2f}{Style.RESET_ALL}")
+
     return balances
 
 

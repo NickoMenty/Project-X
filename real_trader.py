@@ -164,20 +164,23 @@ def init_traders():
     return loaded
 
 
-def fetch_all_balances() -> Dict[str, float]:
-    """Fetch USDT balance from all initialised traders concurrently."""
-    balances = {}
-    errors = {}
+def fetch_all_balances() -> Dict[str, object]:
+    """
+    Fetch USDT balance from all initialised traders concurrently.
+    Returns {exchange: float} for successes, {exchange: None} for failures.
+    """
+    balances: Dict[str, object] = {}
+    errors: Dict[str, str] = {}
 
     def _fetch(name, trader):
         try:
             if DRY_RUN:
-                balances[name] = 100.0  # fake balance in dry-run
+                balances[name] = 100.0
             else:
                 balances[name] = trader.get_balance()
         except Exception as e:
             errors[name] = str(e)
-            balances[name] = 0.0
+            balances[name] = None
 
     threads = [threading.Thread(target=_fetch, args=(n, t)) for n, t in _traders.items()]
     for t in threads: t.start()

@@ -432,13 +432,19 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     print(Style.BRIGHT + "\n  ── FETCHING OPENING BALANCES ──\n" + Style.RESET_ALL)
     balances = fetch_all_balances()
     _session_log = SessionLog()
-    _session_log.update_balances(balances)
-    bal_lines = "  ".join(f"{ex}: ${b:.2f}" for ex, b in balances.items() if b)
-    print(f"  {bal_lines}\n")
+    _session_log.update_balances({k: v for k, v in balances.items() if v is not None})
+
+    def _bal_line(ex, val):
+        if val is None:
+            return f"  ❌ {ex}: fetch failed"
+        if ex not in balances:
+            return f"  ⚠️ {ex}: not initialised"
+        return f"  ✅ {ex}: ${val:.2f}"
+
     send_alert(
         "▶️ Started — monitoring funding rates\n"
         + ("🔒 DRY-RUN mode (no real orders)\n" if DRY_RUN else "💰 LIVE trading active\n")
-        + "\n".join(f"  {ex}: ${b:.2f}" for ex, b in balances.items())
+        + "\n".join(_bal_line(ex, balances.get(ex)) for ex in ["Binance", "Bybit", "MEXC", "Bitget", "Hyperliquid", "AsterDex"])
     )
 
     while True:

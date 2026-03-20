@@ -23,7 +23,8 @@ from typing import Optional
 import requests
 from dotenv import load_dotenv
 
-from spike_scorer import SpikeOpportunity
+from spike_scorer import SpikeOpportunity, POSITION_SIZE_USD
+from real_trader import TARGET_LEVERAGE
 from typing import List, Any
 
 load_dotenv()
@@ -132,6 +133,7 @@ def send_spike_opportunities(
     lines = [
         f"<b>⚡ PRE-EPOCH SCAN  |  T-{seconds_to_epoch:.0f}s  |  {ts_str}</b>",
         f"<b>{len(passing)} passing  |  {len(passing) + len(failing)} scored</b>",
+        f"Size: ${POSITION_SIZE_USD:.0f} per leg  |  Leverage: {TARGET_LEVERAGE}x  |  Margin: ${POSITION_SIZE_USD / TARGET_LEVERAGE:.2f}",
     ]
 
     if not passing:
@@ -160,7 +162,7 @@ def send_spike_opportunities(
                 f"  L: <code>{opp.long_exchange}</code>  {opp.long_rate_pct:+.4f}%  🕐 {_fmt_ts(long_ts)}\n"
                 f"  S: <code>{opp.short_exchange}</code>  {opp.short_rate_pct:+.4f}%  🕐 {_fmt_ts(short_ts)}\n"
                 f"  Spread: {opp.funding_spread_pct:.4f}%  Fees: {opp.total_fee_pct:.4f}%\n"
-                f"  Score: <b>{opp.score:+.4f}%</b>  Est: <b>${opp.estimated_profit_usd:.4f}</b>"
+                f"  Score: <b>{opp.score:+.4f}%</b>  Est profit: <b>${opp.estimated_profit_usd:.4f}</b>"
             )
 
     near_misses = [o for o in failing if o.funding_spread_pct > 0][:3]

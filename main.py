@@ -41,7 +41,7 @@ from real_trader import (
     real_entry, real_exit, print_trade_report,
     EXIT_WAIT_SECONDS, DRY_RUN,
     init_traders, fetch_all_balances,
-    _traders,
+    _traders, TARGET_LEVERAGE,
 )
 from session_log import SessionLog
 from telegram_reporter import send_trade_report, send_spike_opportunities, send_alert
@@ -300,7 +300,7 @@ def display_spike_opportunities(
             "L.Rate", "S.Rate", "Spread",
             "Fees Long (o+c)", "Fees Short (o+c)", "Score",
             "Price Spread", "Long Funding", "Short Funding", "In",
-            f"Est.Profit (${POSITION_SIZE_USD:.0f})"
+            f"Est.Profit (${POSITION_SIZE_USD:.0f}×{TARGET_LEVERAGE}x)"
         ]
         rows = []
         for i, opp in enumerate(passing, 1):
@@ -330,7 +330,8 @@ def display_spike_opportunities(
         print(
             f"  Score = funding spread - round-trip fees  |  "
             f"Fees = (fee_long + fee_short) × 2  |  "
-            f"Position size: ${POSITION_SIZE_USD:.0f} per leg"
+            f"Position size: ${POSITION_SIZE_USD:.0f} per leg  |  Leverage: {TARGET_LEVERAGE}x  |  "
+            f"Margin per leg: ${POSITION_SIZE_USD / TARGET_LEVERAGE:.2f}"
         )
 
     # Near-misses: top 5 failing by funding spread
@@ -479,12 +480,13 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
         next_event = _next_primary_event_ms(records) if not no_score else None
         prescan_ms = (next_event - 15_000) if next_event else None
 
-        # Fire pre-scan if: event is within this cycle window, T-15s hasn't
-        # passed yet, and we haven't already scanned this exact event.
+        # Fire pre-scan if: T-15s hasn't passed yet, event is within 2 cycles
+        # (handles the case where T-15s falls just past the cycle boundary),
+        # and we haven't already scanned this exact event.
         if (
             prescan_ms
             and prescan_ms > now_ms
-            and prescan_ms < cycle_end_ms
+            and next_event < now_ms + interval * 2 * 1000
             and next_event != last_scanned_event
         ):
             sleep_s = (prescan_ms - time.time() * 1000) / 1000

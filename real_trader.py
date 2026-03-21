@@ -504,10 +504,12 @@ def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bo
                     f"manual close required on {name}"
                 )
             else:
+                open_px  = entry.fill_price if entry.fill_price > 0 else mark_price
+                close_px = close.fill_price if close.fill_price > 0 else mark_price
                 results[name] = (
                     True,
-                    f"open {entry.qty:.6f} @ ${entry.fill_price:,.2f}  →  "
-                    f"close @ ${close.fill_price:,.2f}"
+                    f"open {entry.qty:.6f} @ ${open_px:,.2f}  →  "
+                    f"close @ ${close_px:,.2f}"
                 )
         except Exception as e:
             results[name] = (False, repr(e) or type(e).__name__)

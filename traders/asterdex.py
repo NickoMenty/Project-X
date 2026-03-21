@@ -206,8 +206,9 @@ class AsterDexTrader(BaseTrader):
             params["reduceOnly"] = "true"
 
         resp = self._req("POST", "/fapi/v3/order", params)
-        avg  = resp.get("avgPrice", "0")
-        fill = float(avg) if avg and float(avg) > 0 else float(resp.get("price") or mark_price)
+        avg   = float(resp.get("avgPrice") or 0)
+        price = float(resp.get("price") or 0)
+        fill  = avg if avg > 0 else (price if price > 0 else mark_price)
         oid  = str(resp.get("orderId", ""))
         return TradeResult(self.exchange_name, symbol, raw, side, qty, fill,
                            qty * fill, leverage, order_id=oid)

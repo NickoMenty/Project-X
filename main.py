@@ -303,7 +303,7 @@ def display_spike_opportunities(
             "L.Rate", "S.Rate", "Spread",
             "Fees Long (o+c)", "Fees Short (o+c)", "Score",
             "Price Spread", "Long Funding", "Short Funding", "In",
-            f"Est.Profit (${POSITION_SIZE_USD:.0f}×{TARGET_LEVERAGE}x)"
+            f"Est.Profit (${POSITION_SIZE_USD/TARGET_LEVERAGE:.0f}margin×{TARGET_LEVERAGE}x)"
         ]
         rows = []
         for i, opp in enumerate(passing, 1):

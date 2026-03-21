@@ -124,7 +124,6 @@ def init_traders():
 
     from traders.binance import BinanceTrader
     from traders.bybit import BybitTrader
-    from traders.mexc import MEXCTrader
     from traders.bitget import BitgetTrader
     from traders.asterdex import AsterDexTrader
     from traders.hyperliquid import HyperliquidTrader
@@ -145,8 +144,6 @@ def init_traders():
     _try("Bybit", lambda: BybitTrader(
         os.environ["BYBIT_KEY"], os.environ["BYBIT_SECRET"]))
 
-    _try("MEXC", lambda: MEXCTrader(
-        os.environ["MEXC_KEY"], os.environ["MEXC_SECRET"]))
 
     _try("Bitget", lambda: BitgetTrader(
         os.environ["BITGET_KEY"], os.environ["BITGET_SECRET"], os.environ["BITGET_PASS"]))

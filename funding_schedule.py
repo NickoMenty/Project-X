@@ -22,7 +22,6 @@ FUNDING_HOURS: Dict[str, List[int]] = {
     "AsterDex":    [0, 8, 16],
     "Bitget":      [0, 8, 16],
     "Hyperliquid": list(range(24)),   # every hour
-    "MEXC":        [0, 8, 16],
     "Lighter":     list(range(24)),   # every hour
 }
 

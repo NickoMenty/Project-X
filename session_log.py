@@ -3,7 +3,7 @@ Session Log — per-session CSV trade journal.
 A new CSV file is created for each run of main.py.
 Columns: deal, timestamp, symbol, long_exchange, short_exchange,
          position_size_usd, leverage,
-         binance_bal, bybit_bal, mexc_bal, bitget_bal, hyperliquid_bal, asterdex_bal,
+         binance_bal, bybit_bal, bitget_bal, hyperliquid_bal, asterdex_bal,
          price_pnl_usd, funding_pnl_usd, fees_usd, net_pnl_usd, net_balance_change
 """
 import csv
@@ -11,7 +11,7 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-EXCHANGES = ["Binance", "Bybit", "MEXC", "Bitget", "Hyperliquid", "AsterDex"]
+EXCHANGES = ["Binance", "Bybit", "Bitget", "Hyperliquid", "AsterDex"]
 
 
 def _session_filename() -> str:

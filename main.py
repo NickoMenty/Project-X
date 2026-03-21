@@ -30,7 +30,7 @@ from tabulate import tabulate
 from colorama import init, Fore, Style
 
 from exchanges.base import FundingData
-from exchanges import bybit, binance, hyperliquid, asterdex, lighter, mexc, bitget
+from exchanges import bybit, binance, hyperliquid, asterdex, lighter, bitget
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
@@ -55,7 +55,6 @@ EXCHANGE_FETCHERS = {
     "Hyperliquid": hyperliquid.fetch_funding_rates,
     "AsterDex":    asterdex.fetch_funding_rates,
     "Lighter":     lighter.fetch_funding_rates,
-    "MEXC":        mexc.fetch_funding_rates,
     "Bitget":      bitget.fetch_funding_rates,
 }
 
@@ -468,7 +467,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     send_alert(
         "▶️ Started — monitoring funding rates\n"
         + ("🔒 DRY-RUN mode (no real orders)\n" if DRY_RUN else "💰 LIVE trading active\n")
-        + "\n".join(_bal_line(ex, balances.get(ex)) for ex in ["Binance", "Bybit", "MEXC", "Bitget", "Hyperliquid", "AsterDex"])
+        + "\n".join(_bal_line(ex, balances.get(ex)) for ex in ["Binance", "Bybit", "Bitget", "Hyperliquid", "AsterDex"])
     )
 
     while True:

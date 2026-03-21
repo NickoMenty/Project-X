@@ -1,119 +1,134 @@
 """
-AsterDex Perpetuals trading client (Binance-compatible API).
-Uses same signing and endpoints as Binance Futures with a different base URL.
+AsterDex Perpetuals trading client (v3 API — EIP-712 private key auth).
+
+Auth: EIP-712 structured data signing (name=AsterSignTransaction, chainId=1666)
+Nonce: microseconds (time.time() * 1_000_000)
+Params: user (main wallet), signer (API wallet derived from private key), nonce, signature
+Docs: https://github.com/asterdex/api-docs/blob/master/aster-finance-futures-api-v3.md
 """
-import hashlib
-import hmac
-import math
+import copy
 import time
+import urllib.parse
 import requests
 from typing import Dict, Optional
 
 from .base import BaseTrader, TradeResult
 
-BASE_URLS = [
-    "https://api.asterdex.com",
-    "https://www.asterdex.com",
-]
+BASE = "https://fapi3.asterdex.com"
+
+_TYPED_DATA = {
+    "types": {
+        "EIP712Domain": [
+            {"name": "name",             "type": "string"},
+            {"name": "version",          "type": "string"},
+            {"name": "chainId",          "type": "uint256"},
+            {"name": "verifyingContract","type": "address"},
+        ],
+        "Message": [
+            {"name": "msg", "type": "string"},
+        ],
+    },
+    "primaryType": "Message",
+    "domain": {
+        "name":             "AsterSignTransaction",
+        "version":          "1",
+        "chainId":          1666,
+        "verifyingContract":"0x0000000000000000000000000000000000000000",
+    },
+    "message": {"msg": ""},
+}
+
+_HEADERS = {
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent":   "PythonApp/1.0",
+}
 
 
 class AsterDexTrader(BaseTrader):
     exchange_name = "AsterDex"
 
-    def __init__(self, api_key: str, api_secret: str):
-        self.key = api_key
-        self.secret = api_secret
-        self._base: Optional[str] = None
+    def __init__(self, user: str, private_key: str):
+        """
+        user        — main account wallet address (ASTER_WALLET)
+        private_key — private key of the API signer wallet (ASTER_PRIVATE)
+        """
+        from eth_account import Account
+        self.user = user
+        if not private_key.startswith("0x"):
+            private_key = "0x" + private_key
+        self._account = Account.from_key(private_key)
+        self.signer = self._account.address
         self._step_cache: Dict[str, float] = {}
-        self._min_cache: Dict[str, float] = {}
-        self._time_offset_ms: int = 0
-        self._sync_time()
+        self._min_cache:  Dict[str, float] = {}
+        self._nonce_sec = 0
+        self._nonce_i   = 0
 
-    def _sync_time(self):
-        try:
-            base = self._get_base()
-            resp = requests.get(f"{base}/fapi/v1/time", timeout=5).json()
-            server_ms = int(resp["serverTime"])
-            self._time_offset_ms = server_ms - int(time.time() * 1000)
-        except Exception:
-            self._time_offset_ms = 0
+    # ── Nonce ──────────────────────────────────────────────────────────────────
 
-    def _now_ms(self) -> int:
-        return int(time.time() * 1000) + self._time_offset_ms
+    def _get_nonce(self) -> int:
+        """Monotonically increasing microsecond nonce (per AsterDex v3 spec)."""
+        now = int(time.time())
+        if now == self._nonce_sec:
+            self._nonce_i += 1
+        else:
+            self._nonce_sec = now
+            self._nonce_i   = 0
+        return now * 1_000_000 + self._nonce_i
 
-    def _get_base(self) -> str:
-        if self._base:
-            return self._base
-        for url in BASE_URLS:
-            try:
-                r = requests.get(f"{url}/fapi/v1/time", timeout=5)
-                if r.status_code == 200:
-                    self._base = url
-                    return url
-            except Exception:
-                continue
-        raise RuntimeError("AsterDex: all base URLs unreachable")
-
-    # ── Auth (same as Binance) ─────────────────────────────────────────────────
+    # ── Signing ────────────────────────────────────────────────────────────────
 
     def _sign(self, params: dict) -> str:
-        qs = "&".join(f"{k}={v}" for k, v in params.items())
-        sig = hmac.new(self.secret.encode(), qs.encode(), hashlib.sha256).hexdigest()
-        return f"{qs}&signature={sig}"
+        from eth_account.messages import encode_structured_data
+        td = copy.deepcopy(_TYPED_DATA)
+        td["message"]["msg"] = urllib.parse.urlencode(params)
+        msg = encode_structured_data(td)
+        return self._account.sign_message(msg).signature.hex()
 
-    def _headers(self) -> dict:
-        return {
-            "X-MBX-APIKEY": self.key,
-            "Content-Type": "application/json",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        }
+    # ── HTTP ───────────────────────────────────────────────────────────────────
 
-    def _req(self, method: str, path: str, params: dict, retries: int = 3) -> dict:
-        last_err = None
-        # Try all base URLs on each attempt to work around per-URL blocks
-        bases_to_try = BASE_URLS if self._base is None else [self._base] + [u for u in BASE_URLS if u != self._base]
-        for attempt in range(retries):
-            base = bases_to_try[attempt % len(bases_to_try)]
-            try:
-                params["timestamp"] = self._now_ms()
-                params.setdefault("recvWindow", 10000)
-                url = f"{base}{path}?{self._sign(params)}"
-                resp = requests.request(method, url, headers=self._headers(), timeout=10)
-                text = resp.text.strip()
-                if not text:
-                    raise RuntimeError(f"Empty response (HTTP {resp.status_code})")
-                if resp.status_code == 403:
-                    raise RuntimeError(f"HTTP 403 from {base}: {text[:200]}")
-                try:
-                    data = resp.json()
-                except Exception:
-                    raise RuntimeError(f"Non-JSON response (HTTP {resp.status_code}): {text[:300]}")
-                if isinstance(data, dict) and int(data.get("code", 0)) < 0:
-                    raise RuntimeError(f"AsterDex {data.get('code')}: {data.get('msg')}")
-                return data
-            except Exception as e:
-                last_err = e
-                time.sleep(0.5)
-        raise RuntimeError(f"AsterDex {method} {path} failed after {retries} attempts: {last_err}")
+    def _req(self, method: str, path: str, params: dict) -> dict:
+        params["nonce"]  = str(self._get_nonce())
+        params["user"]   = self.user
+        params["signer"] = self.signer
+        sig      = self._sign(params)
+        param_str = urllib.parse.urlencode(params)
+        url = f"{BASE}{path}?{param_str}&signature={sig}"
+        resp = requests.request(method, url, headers=_HEADERS, timeout=10)
+        text = resp.text.strip()
+        if not text:
+            raise RuntimeError(f"Empty response (HTTP {resp.status_code})")
+        if resp.status_code == 403:
+            raise RuntimeError(f"HTTP 403: {text[:200]}")
+        try:
+            data = resp.json()
+        except Exception:
+            raise RuntimeError(f"Non-JSON (HTTP {resp.status_code}): {text[:300]}")
+        if isinstance(data, dict) and int(data.get("code", 0)) < 0:
+            raise RuntimeError(f"AsterDex {data.get('code')}: {data.get('msg')}")
+        return data
 
     # ── Instrument info ────────────────────────────────────────────────────────
 
     def _load_lot_info(self, raw: str):
         if raw in self._step_cache:
             return
-        base = self._get_base()
-        info = requests.get(f"{base}/fapi/v1/exchangeInfo", timeout=10).json()
+        try:
+            info = requests.get(f"{BASE}/fapi/v1/exchangeInfo", timeout=10).json()
+        except Exception:
+            self._step_cache[raw] = 1.0
+            self._min_cache[raw]  = 0.0
+            return
         for sym in info.get("symbols", []):
             if sym["symbol"] != raw:
                 continue
             for f in sym.get("filters", []):
                 if f["filterType"] == "LOT_SIZE":
                     self._step_cache[raw] = float(f["stepSize"])
-                    self._min_cache[raw] = float(f["minQty"])
+                    self._min_cache[raw]  = float(f["minQty"])
             break
         if raw not in self._step_cache:
             self._step_cache[raw] = 1.0
-            self._min_cache[raw] = 0.0
+            self._min_cache[raw]  = 0.0
 
     def _round_qty(self, raw: str, qty: float) -> float:
         return self.round_step(qty, self._step_cache.get(raw, 1.0))
@@ -127,7 +142,7 @@ class AsterDexTrader(BaseTrader):
     # ── BaseTrader ─────────────────────────────────────────────────────────────
 
     def get_balance(self) -> float:
-        data = self._req("GET", "/fapi/v2/balance", {})
+        data = self._req("GET", "/fapi/v3/balance", {})
         if isinstance(data, list):
             for asset in data:
                 if asset.get("asset") == "USDT":
@@ -138,13 +153,11 @@ class AsterDexTrader(BaseTrader):
         raw = self.fmt_symbol(symbol)
         for lev in [leverage, 5]:
             try:
-                self._req("POST", "/fapi/v1/leverage", {"symbol": raw, "leverage": lev})
+                self._req("POST", "/fapi/v3/leverage", {"symbol": raw, "leverage": lev})
                 return lev
             except RuntimeError as e:
                 msg = str(e)
-                if "-4028" in msg:  # already at this leverage value
-                    return lev
-                if "-4055" in msg:  # open position exists — use as-is
+                if "-4028" in msg or "-4055" in msg:
                     return lev
                 continue
         raise RuntimeError(f"AsterDex: could not set leverage for {raw}")
@@ -161,23 +174,23 @@ class AsterDexTrader(BaseTrader):
             return TradeResult(self.exchange_name, symbol, raw, side, 0, 0, notional_usd, leverage, error=err)
 
         params = {
-            "symbol": raw,
-            "side": side.upper(),
-            "type": "MARKET",
-            "quantity": qty,
+            "symbol":   raw,
+            "side":     side.upper(),
+            "type":     "MARKET",
+            "quantity": str(qty),
         }
         if reduce_only:
             params["reduceOnly"] = "true"
 
-        resp = self._req("POST", "/fapi/v1/order", params)
-        avg = resp.get("avgPrice", "0")
+        resp = self._req("POST", "/fapi/v3/order", params)
+        avg  = resp.get("avgPrice", "0")
         fill = float(avg) if avg and float(avg) > 0 else float(resp.get("price") or mark_price)
-        oid = str(resp.get("orderId", ""))
+        oid  = str(resp.get("orderId", ""))
         return TradeResult(self.exchange_name, symbol, raw, side, qty, fill,
                            qty * fill, leverage, order_id=oid)
 
     def open_long(self, symbol, notional_usd, mark_price, leverage):
-        return self._place(symbol, "BUY", notional_usd, mark_price, leverage)
+        return self._place(symbol, "BUY",  notional_usd, mark_price, leverage)
 
     def open_short(self, symbol, notional_usd, mark_price, leverage):
         return self._place(symbol, "SELL", notional_usd, mark_price, leverage)
@@ -186,4 +199,4 @@ class AsterDexTrader(BaseTrader):
         return self._place(symbol, "SELL", 0, 0, 1, reduce_only=True, close_qty=qty)
 
     def close_short(self, symbol, qty):
-        return self._place(symbol, "BUY", 0, 0, 1, reduce_only=True, close_qty=qty)
+        return self._place(symbol, "BUY",  0, 0, 1, reduce_only=True, close_qty=qty)

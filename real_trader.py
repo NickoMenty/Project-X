@@ -152,7 +152,7 @@ def init_traders():
         os.environ["BITGET_KEY"], os.environ["BITGET_SECRET"], os.environ["BITGET_PASS"]))
 
     _try("AsterDex", lambda: AsterDexTrader(
-        os.environ["ASTER_KEY"], os.environ["ASTER_SECRET"]))
+        os.environ["ASTER_WALLET"], os.environ["ASTER_PRIVATE"]))
 
     try:
         import eth_account  # noqa

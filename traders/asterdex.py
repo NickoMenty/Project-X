@@ -73,9 +73,15 @@ class AsterDexTrader(BaseTrader):
                 params.setdefault("recvWindow", 10000)
                 url = f"{base}{path}?{self._sign(params)}"
                 resp = requests.request(method, url, headers=self._headers(), timeout=10)
-                if not resp.text:
-                    raise RuntimeError("Empty response body")
-                data = resp.json()
+                text = resp.text.strip()
+                if not text:
+                    raise RuntimeError(f"Empty response (HTTP {resp.status_code})")
+                if resp.status_code == 403:
+                    raise RuntimeError(f"HTTP 403 — AsterDex is blocking this server's IP: {text[:200]}")
+                try:
+                    data = resp.json()
+                except Exception:
+                    raise RuntimeError(f"Non-JSON response (HTTP {resp.status_code}): {text[:300]}")
                 if isinstance(data, dict) and int(data.get("code", 0)) < 0:
                     raise RuntimeError(f"AsterDex {data.get('code')}: {data.get('msg')}")
                 return data

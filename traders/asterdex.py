@@ -78,10 +78,10 @@ class AsterDexTrader(BaseTrader):
     # ── Signing ────────────────────────────────────────────────────────────────
 
     def _sign(self, params: dict) -> str:
-        from eth_account.messages import encode_structured_data
+        from eth_account.messages import encode_typed_data
         td = copy.deepcopy(_TYPED_DATA)
         td["message"]["msg"] = urllib.parse.urlencode(params)
-        msg = encode_structured_data(td)
+        msg = encode_typed_data(full_message=td)
         return self._account.sign_message(msg).signature.hex()
 
     # ── HTTP ───────────────────────────────────────────────────────────────────

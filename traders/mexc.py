@@ -51,9 +51,10 @@ class MEXCTrader(BaseTrader):
                 resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, body),
                                      data=body, timeout=10)
                 text = resp.text.strip()
-                print(f"[MEXC DEBUG] POST {path} → HTTP {resp.status_code} body={text[:200]!r}")
                 if not text:
                     raise RuntimeError(f"Empty response (HTTP {resp.status_code})")
+                if resp.status_code == 403:
+                    raise RuntimeError(f"HTTP 403 — MEXC is blocking this server's IP (geo/WAF restriction)")
                 try:
                     data = resp.json()
                 except Exception:

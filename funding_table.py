@@ -28,7 +28,7 @@ from typing import Dict, List, Optional
 from colorama import init, Fore, Style
 from tabulate import tabulate
 
-from exchanges import bybit, binance, hyperliquid, asterdex, lighter, bitget
+from exchanges import bybit, binance, hyperliquid, asterdex, bitget
 from exchanges.base import FundingData
 
 init(autoreset=True)
@@ -38,7 +38,6 @@ EXCHANGE_FETCHERS = {
     "Binance":     binance.fetch_funding_rates,
     "Hyperliquid": hyperliquid.fetch_funding_rates,
     "AsterDex":    asterdex.fetch_funding_rates,
-    "Lighter":     lighter.fetch_funding_rates,
     "Bitget":      bitget.fetch_funding_rates,
 }
 

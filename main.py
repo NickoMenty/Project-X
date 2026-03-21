@@ -30,7 +30,7 @@ from tabulate import tabulate
 from colorama import init, Fore, Style
 
 from exchanges.base import FundingData
-from exchanges import bybit, binance, hyperliquid, asterdex, lighter, bitget
+from exchanges import bybit, binance, hyperliquid, asterdex, bitget
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
@@ -54,7 +54,6 @@ EXCHANGE_FETCHERS = {
     "Binance":     binance.fetch_funding_rates,
     "Hyperliquid": hyperliquid.fetch_funding_rates,
     "AsterDex":    asterdex.fetch_funding_rates,
-    "Lighter":     lighter.fetch_funding_rates,
     "Bitget":      bitget.fetch_funding_rates,
 }
 

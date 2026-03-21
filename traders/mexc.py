@@ -50,7 +50,7 @@ class MEXCTrader(BaseTrader):
                 body = json.dumps(payload)
                 resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, body),
                                      data=body, timeout=10)
-                if not resp.text:
+                if not resp.text.strip():
                     raise RuntimeError(f"Empty response body (HTTP {resp.status_code})")
                 data = resp.json()
                 if not data.get("success", True):
@@ -68,8 +68,8 @@ class MEXCTrader(BaseTrader):
                 ts = str(int(time.time() * 1000))
                 qs = "&".join(f"{k}={v}" for k, v in params.items())
                 resp = requests.get(f"{BASE}{path}?{qs}", headers=self._headers(ts), timeout=10)
-                if not resp.text:
-                    raise RuntimeError("Empty response body")
+                if not resp.text.strip():
+                    raise RuntimeError(f"Empty response body (HTTP {resp.status_code})")
                 data = resp.json()
                 if not data.get("success", True):
                     raise RuntimeError(f"MEXC error: {data.get('message', data)}")

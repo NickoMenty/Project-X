@@ -456,7 +456,11 @@ def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bo
             continue
 
         try:
-            entry = trader.open_long(TEST_ORDER_SYMBOL, TEST_ORDER_NOTIONAL, mark_price, 1)
+            try:
+                trader.set_leverage(TEST_ORDER_SYMBOL, TARGET_LEVERAGE)
+            except Exception:
+                pass
+            entry = trader.open_long(TEST_ORDER_SYMBOL, TEST_ORDER_NOTIONAL, mark_price, TARGET_LEVERAGE)
             if not entry.success:
                 results[name] = (False, f"open failed: {entry.error}")
                 continue

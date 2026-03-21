@@ -164,9 +164,11 @@ class OKXTrader(BaseTrader):
                            qty, mark_price, qty * mark_price, leverage, order_id=oid)
 
     def open_long(self, symbol, notional_usd, mark_price, leverage):
+        self.set_leverage(symbol, leverage)
         return self._place(symbol, "buy", "long", notional_usd, mark_price, leverage)
 
     def open_short(self, symbol, notional_usd, mark_price, leverage):
+        self.set_leverage(symbol, leverage)
         return self._place(symbol, "sell", "short", notional_usd, mark_price, leverage)
 
     def close_long(self, symbol, qty):

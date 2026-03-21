@@ -6,6 +6,7 @@ Requires: pip install eth-account
 HYPERLIQUID_API env var should be the wallet private key (hex, with or without 0x prefix).
 """
 import json
+import math
 import time
 import requests
 from typing import Dict, Optional
@@ -179,12 +180,17 @@ class HyperliquidTrader(BaseTrader):
         """
         asset = self._asset_index(symbol)
         slippage = 1.02 if is_buy else 0.98
-        limit_px = round(mark_price * slippage, 6)
+        raw_px = mark_price * slippage
+        # Hyperliquid wire format: 5 significant figures, no trailing zeros
+        sig_figs = 5
+        magnitude = int(math.floor(math.log10(abs(raw_px)))) if raw_px > 0 else 0
+        limit_px = round(raw_px, sig_figs - 1 - magnitude)
+        px_str = f"{limit_px:g}"
 
         order = {
             "a": asset,
             "b": is_buy,
-            "p": str(limit_px),
+            "p": px_str,
             "s": str(sz),
             "r": reduce_only,
             "t": {"limit": {"tif": "Ioc"}},

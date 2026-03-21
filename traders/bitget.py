@@ -191,6 +191,7 @@ class BitgetTrader(BaseTrader):
             "symbol": raw,
             "productType": "usdt-futures",
             "marginCoin": "USDT",
+            "marginMode": "isolated",
             "size": str(qty_r),
             "side": side,
             "orderType": "market",

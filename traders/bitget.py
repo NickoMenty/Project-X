@@ -146,10 +146,7 @@ class BitgetTrader(BaseTrader):
             "tradeSide": trade_side,
             "orderType": "market",
         }
-        # marginMode only applies when opening — including it on close causes
-        # a mismatch error if the account default differs from "isolated"
-        if trade_side == "open":
-            payload["marginMode"] = "isolated"
+        payload["marginMode"] = "isolated"
         resp = self._post("/api/v2/mix/order/place-order", payload)
         oid = str(resp.get("orderId", ""))
         fill = mark_price  # Bitget market orders fill async; use mark as estimate

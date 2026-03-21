@@ -22,6 +22,19 @@ class BinanceTrader(BaseTrader):
         self.secret = api_secret
         self._step_cache: Dict[str, float] = {}   # symbol → stepSize
         self._min_cache: Dict[str, float] = {}    # symbol → minQty
+        self._time_offset_ms: int = 0
+        self._sync_time()
+
+    def _sync_time(self):
+        try:
+            resp = requests.get(f"{BASE}/fapi/v1/time", timeout=5).json()
+            server_ms = int(resp["serverTime"])
+            self._time_offset_ms = server_ms - int(time.time() * 1000)
+        except Exception:
+            self._time_offset_ms = 0
+
+    def _now_ms(self) -> int:
+        return int(time.time() * 1000) + self._time_offset_ms
 
     # ── Auth ───────────────────────────────────────────────────────────────────
 
@@ -34,7 +47,7 @@ class BinanceTrader(BaseTrader):
         return {"X-MBX-APIKEY": self.key}
 
     def _req(self, method: str, path: str, params: dict) -> dict:
-        params["timestamp"] = int(time.time() * 1000)
+        params["timestamp"] = self._now_ms()
         params.setdefault("recvWindow", 10000)
         url = f"{BASE}{path}?{self._sign(params)}"
         resp = requests.request(method, url, headers=self._headers(), timeout=10)

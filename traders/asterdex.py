@@ -26,6 +26,20 @@ class AsterDexTrader(BaseTrader):
         self._base: Optional[str] = None
         self._step_cache: Dict[str, float] = {}
         self._min_cache: Dict[str, float] = {}
+        self._time_offset_ms: int = 0
+        self._sync_time()
+
+    def _sync_time(self):
+        try:
+            base = self._get_base()
+            resp = requests.get(f"{base}/fapi/v1/time", timeout=5).json()
+            server_ms = int(resp["serverTime"])
+            self._time_offset_ms = server_ms - int(time.time() * 1000)
+        except Exception:
+            self._time_offset_ms = 0
+
+    def _now_ms(self) -> int:
+        return int(time.time() * 1000) + self._time_offset_ms
 
     def _get_base(self) -> str:
         if self._base:
@@ -50,16 +64,25 @@ class AsterDexTrader(BaseTrader):
     def _headers(self) -> dict:
         return {"X-MBX-APIKEY": self.key}
 
-    def _req(self, method: str, path: str, params: dict) -> dict:
-        base = self._get_base()
-        params["timestamp"] = int(time.time() * 1000)
-        params.setdefault("recvWindow", 10000)
-        url = f"{base}{path}?{self._sign(params)}"
-        resp = requests.request(method, url, headers=self._headers(), timeout=10)
-        data = resp.json()
-        if isinstance(data, dict) and int(data.get("code", 0)) < 0:
-            raise RuntimeError(f"AsterDex {data.get('code')}: {data.get('msg')}")
-        return data
+    def _req(self, method: str, path: str, params: dict, retries: int = 3) -> dict:
+        last_err = None
+        for _ in range(retries):
+            try:
+                base = self._get_base()
+                params["timestamp"] = self._now_ms()
+                params.setdefault("recvWindow", 10000)
+                url = f"{base}{path}?{self._sign(params)}"
+                resp = requests.request(method, url, headers=self._headers(), timeout=10)
+                if not resp.text:
+                    raise RuntimeError("Empty response body")
+                data = resp.json()
+                if isinstance(data, dict) and int(data.get("code", 0)) < 0:
+                    raise RuntimeError(f"AsterDex {data.get('code')}: {data.get('msg')}")
+                return data
+            except Exception as e:
+                last_err = e
+                time.sleep(0.5)
+        raise RuntimeError(f"AsterDex {method} {path} failed after {retries} attempts: {last_err}")
 
     # ── Instrument info ────────────────────────────────────────────────────────
 

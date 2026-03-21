@@ -103,13 +103,12 @@ class HyperliquidTrader(BaseTrader):
 
     def _sign_action(self, action: dict, nonce: int) -> dict:
         """
-        Sign a Hyperliquid L1 action using the correct EIP-712 Agent struct.
+        Sign a Hyperliquid L1 action using EIP-712 Agent struct.
 
         Per the Hyperliquid open-source SDK:
           1. connection_id = keccak256(msgpack(action) || uint64_be(nonce) || 0x00)
-          2. Domain separator: Exchange / version 1 / chainId 1337 / zero address
-          3. Agent struct: { source: "a" (mainnet), connectionId: bytes32 }
-          4. Final digest: keccak256(0x1901 || domain_hash || agent_hash)
+          2. Sign Agent typed data: { source: "a", connectionId: bytes32 }
+             with domain: Exchange / version 1 / chainId 1337 / zero address
         """
         try:
             import msgpack as _msgpack
@@ -117,38 +116,42 @@ class HyperliquidTrader(BaseTrader):
             raise ImportError("msgpack is required for Hyperliquid. Install: pip install msgpack")
 
         from eth_hash.auto import keccak
-        from eth_account.messages import encode_defunct
+        from eth_account.messages import encode_typed_data
 
         # 1. connection_id
         raw = _msgpack.packb(action, use_bin_type=True)
         raw += nonce.to_bytes(8, "big")
         raw += b"\x00"  # no vault address
-        connection_id = keccak(raw)
+        connection_id = keccak(raw)  # bytes32
 
-        # 2. EIP-712 domain separator (Exchange, chainId=1337)
-        domain_type_hash = keccak(
-            b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
-        )
-        domain_hash = keccak(
-            domain_type_hash
-            + keccak(b"Exchange")
-            + keccak(b"1")
-            + (1337).to_bytes(32, "big")
-            + bytes(12) + bytes(20)   # zero address, padded to 32 bytes
-        )
-
-        # 3. Agent struct hash
-        agent_type_hash = keccak(b"Agent(string source,bytes32 connectionId)")
-        agent_hash = keccak(
-            agent_type_hash
-            + keccak(b"a")      # source = "a" for mainnet
-            + connection_id     # bytes32
-        )
-
-        # 4. Final EIP-712 digest and sign
-        final_hash = keccak(b"\x19\x01" + domain_hash + agent_hash)
-        msg = encode_defunct(hexstr=final_hash.hex())
-        signed = self._account.sign_message(msg)
+        # 2. EIP-712 typed data sign (correct — no double-wrapping)
+        full_message = {
+            "domain": {
+                "name": "Exchange",
+                "version": "1",
+                "chainId": 1337,
+                "verifyingContract": "0x0000000000000000000000000000000000000000",
+            },
+            "types": {
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+                "Agent": [
+                    {"name": "source", "type": "string"},
+                    {"name": "connectionId", "type": "bytes32"},
+                ],
+            },
+            "primaryType": "Agent",
+            "message": {
+                "source": "a",
+                "connectionId": connection_id,
+            },
+        }
+        signable = encode_typed_data(full_message=full_message)
+        signed = self._account.sign_message(signable)
 
         return {"r": hex(signed.r), "s": hex(signed.s), "v": signed.v}
 

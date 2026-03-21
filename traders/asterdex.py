@@ -14,7 +14,11 @@ from typing import Dict, Optional
 
 from .base import BaseTrader, TradeResult
 
-BASE = "https://fapi3.asterdex.com"
+BASE_URLS = [
+    "https://fapi.asterdex.com",
+    "https://fapi3.asterdex.com",
+    "https://api.asterdex.com",
+]
 
 _TYPED_DATA = {
     "types": {
@@ -62,6 +66,18 @@ class AsterDexTrader(BaseTrader):
         self._min_cache:  Dict[str, float] = {}
         self._nonce_sec = 0
         self._nonce_i   = 0
+        self._base = self._resolve_base()
+
+    def _resolve_base(self) -> str:
+        """Pick the first reachable base URL."""
+        for url in BASE_URLS:
+            try:
+                r = requests.get(f"{url}/fapi/v1/exchangeInfo", timeout=5)
+                if r.status_code < 500:
+                    return url
+            except Exception:
+                continue
+        return BASE_URLS[0]  # fall back to first, let errors surface naturally
 
     # ── Nonce ──────────────────────────────────────────────────────────────────
 
@@ -92,7 +108,7 @@ class AsterDexTrader(BaseTrader):
         params["signer"] = self.signer
         sig      = self._sign(params)
         param_str = urllib.parse.urlencode(params)
-        url = f"{BASE}{path}?{param_str}&signature={sig}"
+        url = f"{self._base}{path}?{param_str}&signature={sig}"
         resp = requests.request(method, url, headers=_HEADERS, timeout=10)
         text = resp.text.strip()
         if not text:
@@ -112,9 +128,14 @@ class AsterDexTrader(BaseTrader):
     def _load_lot_info(self, raw: str):
         if raw in self._step_cache:
             return
-        try:
-            info = requests.get(f"{BASE}/fapi/v1/exchangeInfo", timeout=10).json()
-        except Exception:
+        info = None
+        for base in [self._base] + [u for u in BASE_URLS if u != self._base]:
+            try:
+                info = requests.get(f"{base}/fapi/v1/exchangeInfo", timeout=5).json()
+                break
+            except Exception:
+                continue
+        if info is None:
             self._step_cache[raw] = 1.0
             self._min_cache[raw]  = 0.0
             return
@@ -134,6 +155,8 @@ class AsterDexTrader(BaseTrader):
         return self.round_step(qty, self._step_cache.get(raw, 1.0))
 
     def _check_min(self, raw: str, qty: float) -> Optional[str]:
+        if qty <= 0:
+            return f"qty rounded to 0 for {raw} (step size too large or price missing)"
         min_qty = self._min_cache.get(raw, 0.0)
         if qty < min_qty:
             return f"qty {qty} < minQty {min_qty} for {raw}"

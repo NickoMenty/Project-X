@@ -44,6 +44,20 @@ class SessionLog:
             if ex in self._balances:
                 self._balances[ex] = bal
 
+    def record_opening_balance(self, balances: Dict[str, float]):
+        """Write a first row recording the session's starting balances (no trade)."""
+        self.update_balances(balances)
+        row = (
+            ["OPEN",
+             datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"),
+             "", "", "", 0, 0]
+            + [round(self._balances.get(ex, 0) or 0, 4) for ex in EXCHANGES]
+            + [0, 0, 0, 0, 0]
+        )
+        with open(self.filepath, "a", newline="") as f:
+            csv.writer(f).writerow(row)
+        print(f"  [LOG] Opening balance row recorded → {self.filepath}")
+
     def record_trade(
         self,
         symbol: str,

@@ -83,6 +83,8 @@ class RealTrade:
     completed: bool = False
     error: str = ""
     dry_run: bool = DRY_RUN
+    pre_balances: Dict[str, float] = field(default_factory=dict)
+    post_balances: Dict[str, float] = field(default_factory=dict)
 
     @property
     def entry_long_price(self) -> float:
@@ -175,6 +177,22 @@ def init_traders():
     return loaded
 
 
+def get_all_balances_dict() -> Dict[str, float]:
+    """Fetch balances from all traders concurrently, silently. Returns {exchange: balance}."""
+    result: Dict[str, float] = {}
+
+    def _fetch(name, trader):
+        try:
+            result[name] = trader.get_balance()
+        except Exception:
+            result[name] = 0.0
+
+    threads = [threading.Thread(target=_fetch, args=(n, t)) for n, t in _traders.items()]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    return result
+
+
 def fetch_all_balances() -> Dict[str, object]:
     """
     Fetch USDT balance from all initialised traders concurrently.
@@ -206,6 +224,10 @@ def fetch_all_balances() -> Dict[str, object]:
             print(f"  {name:14s} {Fore.RED}✗ {errors[name]}{Style.RESET_ALL}")
         else:
             print(f"  {name:14s} {Fore.GREEN}${balances.get(name, 0):.2f}{Style.RESET_ALL}")
+
+    total = sum(v for k, v in balances.items() if k != "_errors" and isinstance(v, (int, float)))
+    print(f"\n  {'':14s}  {'─'*20}")
+    print(f"  {'TOTAL USDT':14s}  {Fore.CYAN}{Style.BRIGHT}${total:.2f}{Style.RESET_ALL}")
 
     # Store errors so callers can show them in TG
     balances["_errors"] = errors
@@ -381,6 +403,15 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
         t2 = threading.Thread(target=_close_short)
         t1.start(); t2.start()
         t1.join(); t2.join()
+
+    # Patch fill_price=0: exchange responses for market close orders are often async.
+    # Use exit mark price (fetched at T+0) as the actual fill — it's the best available.
+    if long_exit and long_exit.success and long_exit.fill_price == 0 and exit_long_price > 0:
+        long_exit.fill_price = exit_long_price
+        long_exit.notional_usd = long_exit.qty * exit_long_price
+    if short_exit and short_exit.success and short_exit.fill_price == 0 and exit_short_price > 0:
+        short_exit.fill_price = exit_short_price
+        short_exit.notional_usd = short_exit.qty * exit_short_price
 
     trade.long_exit_result = long_exit
     trade.short_exit_result = short_exit
@@ -562,6 +593,25 @@ def print_trade_report(trade: RealTrade) -> None:
     print(f"    Short  {trade.short_exchange:<14}  {trade.short_fee_pct:.3f}% × 2 (o+c) = "
           f"{Fore.RED}${size * trade.short_fee_pct * 2 / 100:.4f}{Style.RESET_ALL}")
     print(f"    {'Total fees':38}  {Fore.RED}${trade.total_fee_usd:.4f}{Style.RESET_ALL}")
+
+    # ── Balances ───────────────────────────────────────────────────────────────
+    if trade.pre_balances or trade.post_balances:
+        print(f"\n  BALANCES  (pre-entry → post-exit)")
+        all_exch = sorted(set(list(trade.pre_balances) + list(trade.post_balances)))
+        total_pre  = sum(trade.pre_balances.values())
+        total_post = sum(trade.post_balances.values())
+        for ex in all_exch:
+            pre  = trade.pre_balances.get(ex, 0.0)
+            post = trade.post_balances.get(ex, 0.0)
+            delta = post - pre
+            dc = Fore.GREEN if delta >= 0 else Fore.RED
+            print(f"    {ex:<14}  ${pre:.2f} → ${post:.2f}  "
+                  f"({dc}{delta:+.4f}{Style.RESET_ALL})")
+        td = total_post - total_pre
+        tc = Fore.GREEN if td >= 0 else Fore.RED
+        print(f"    {'─'*50}")
+        print(f"    {'TOTAL USDT':<14}  ${total_pre:.2f} → ${total_post:.2f}  "
+              f"({tc}{Style.BRIGHT}{td:+.4f}{Style.RESET_ALL})")
 
     # ── Summary ───────────────────────────────────────────────────────────────
     print()

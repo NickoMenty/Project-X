@@ -41,7 +41,7 @@ from spike_scorer import (
 from real_trader import (
     real_entry, real_exit, print_trade_report,
     EXIT_WAIT_SECONDS, DRY_RUN,
-    init_traders, fetch_all_balances,
+    init_traders, fetch_all_balances, get_all_balances_dict,
     _traders, TARGET_LEVERAGE,
     run_order_connectivity_test,
 )
@@ -457,7 +457,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     print(Style.BRIGHT + "\n  ── FETCHING OPENING BALANCES ──\n" + Style.RESET_ALL)
     balances = fetch_all_balances()
     _session_log = SessionLog()
-    _session_log.update_balances({k: v for k, v in balances.items() if v is not None})
+    _session_log.record_opening_balance({k: v for k, v in balances.items() if isinstance(v, (int, float)) and k != "_errors"})
 
     _errors = balances.get("_errors", {})
 
@@ -720,7 +720,9 @@ def _run_pre_epoch_scan(
     )
     print(Fore.GREEN + Style.BRIGHT + "─" * 110 + Style.RESET_ALL)
 
+    pre_bals = get_all_balances_dict()
     trade = real_entry(best, event_ts_ms)
+    trade.pre_balances = pre_bals
 
     if trade.error:
         send_alert(f"❌ Entry error for {best.symbol}:\n{trade.error}")
@@ -749,6 +751,8 @@ def _run_pre_epoch_scan(
     exit_short_price = _extract_price(exit_all_data, best.symbol, best.short_exchange, best.short_price)
 
     real_exit(trade, exit_long_price, exit_short_price)
+    post_bals = get_all_balances_dict()
+    trade.post_balances = post_bals
     print_trade_report(trade)
     send_trade_report(trade)
 

@@ -250,13 +250,24 @@ class HyperliquidTrader(BaseTrader):
         fills = resp.get("response", {}).get("data", {}).get("statuses", [{}])
         fill_px = mark_price
         oid = ""
+        side_str = "buy" if is_buy else "sell"
         if fills and isinstance(fills[0], dict):
-            filled = fills[0].get("filled", {})
+            status = fills[0]
+            # Explicit error inside the order status (signing wrong, bad address, etc.)
+            if "error" in status:
+                return TradeResult(self.exchange_name, symbol, raw, side_str,
+                                   0, 0, notional_usd, leverage,
+                                   error=f"HL order rejected: {status['error']}")
+            filled = status.get("filled", {})
             if filled:
                 fill_px = float(filled.get("avgPx", mark_price))
                 oid = str(filled.get("oid", ""))
+            elif not reduce_only:
+                # IOC order didn't fill — likely unfilled or wrong params
+                return TradeResult(self.exchange_name, symbol, raw, side_str,
+                                   0, 0, notional_usd, leverage,
+                                   error=f"HL IOC order did not fill (status: {status})")
 
-        side_str = "buy" if is_buy else "sell"
         return TradeResult(self.exchange_name, symbol, raw, side_str, sz, fill_px,
                            sz * fill_px, leverage, order_id=oid)
 

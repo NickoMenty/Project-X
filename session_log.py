@@ -11,7 +11,8 @@ import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
 
-EXCHANGES = ["Binance", "Bybit", "Bitget", "Hyperliquid", "AsterDex"]
+from settings import active_exchanges
+EXCHANGES = active_exchanges()
 
 
 def _session_filename() -> str:

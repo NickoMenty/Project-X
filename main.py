@@ -31,6 +31,7 @@ from colorama import init, Fore, Style
 
 from exchanges.base import FundingData
 from exchanges import bybit, binance, hyperliquid, asterdex, bitget
+from settings import active_exchanges
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
@@ -49,7 +50,7 @@ from telegram_reporter import send_trade_report, send_spike_opportunities, send_
 
 init(autoreset=True)
 
-EXCHANGE_FETCHERS = {
+_ALL_FETCHERS = {
     "Bybit":       bybit.fetch_funding_rates,
     "Binance":     binance.fetch_funding_rates,
     "Hyperliquid": hyperliquid.fetch_funding_rates,
@@ -57,6 +58,7 @@ EXCHANGE_FETCHERS = {
     "Bitget":      bitget.fetch_funding_rates,
 }
 
+EXCHANGE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchanges()}
 ALL_EXCHANGES = list(EXCHANGE_FETCHERS.keys())
 
 
@@ -466,7 +468,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     send_alert(
         "▶️ Started — monitoring funding rates\n"
         + ("🔒 DRY-RUN mode (no real orders)\n" if DRY_RUN else "💰 LIVE trading active\n")
-        + "\n".join(_bal_line(ex, balances.get(ex)) for ex in ["Binance", "Bybit", "Bitget", "Hyperliquid", "AsterDex"])
+        + "\n".join(_bal_line(ex, balances.get(ex)) for ex in active_exchanges())
     )
 
     while True:

@@ -118,9 +118,11 @@ def init_traders():
     """
     Initialise all exchange trading clients from environment variables.
     Call once at startup. Returns {exchange_name: trader_instance}.
+    Only initialises exchanges that are enabled in settings.py.
     """
     from dotenv import load_dotenv
     load_dotenv()
+    from settings import active_exchanges
 
     from traders.binance import BinanceTrader
     from traders.bybit import BybitTrader
@@ -128,9 +130,13 @@ def init_traders():
     from traders.asterdex import AsterDexTrader
     from traders.hyperliquid import HyperliquidTrader
 
+    enabled = set(active_exchanges())
     loaded = {}
 
     def _try(name, factory):
+        if name not in enabled:
+            print(f"  {name:14s} {Fore.YELLOW}— disabled in settings.py{Style.RESET_ALL}")
+            return
         try:
             t = factory()
             loaded[name] = t
@@ -144,18 +150,18 @@ def init_traders():
     _try("Bybit", lambda: BybitTrader(
         os.environ["BYBIT_KEY"], os.environ["BYBIT_SECRET"]))
 
-
     _try("Bitget", lambda: BitgetTrader(
         os.environ["BITGET_KEY"], os.environ["BITGET_SECRET"], os.environ["BITGET_PASS"]))
 
     _try("AsterDex", lambda: AsterDexTrader(
         os.environ["ASTER_WALLET"], os.environ["ASTER_PRIVATE"]))
 
-    try:
-        import eth_account  # noqa
-        _try("Hyperliquid", lambda: HyperliquidTrader(os.environ["HYPERLIQUID_API"]))
-    except ImportError:
-        print(f"  {'Hyperliquid':14s} {Fore.YELLOW}⚠ eth-account not installed — run: pip install eth-account{Style.RESET_ALL}")
+    if "Hyperliquid" in enabled:
+        try:
+            import eth_account  # noqa
+            _try("Hyperliquid", lambda: HyperliquidTrader(os.environ["HYPERLIQUID_API"]))
+        except ImportError:
+            print(f"  {'Hyperliquid':14s} {Fore.YELLOW}⚠ eth-account not installed — run: pip install eth-account{Style.RESET_ALL}")
 
     _traders.update(loaded)
     return loaded

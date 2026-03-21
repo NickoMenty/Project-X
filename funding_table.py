@@ -30,16 +30,18 @@ from tabulate import tabulate
 
 from exchanges import bybit, binance, hyperliquid, asterdex, bitget
 from exchanges.base import FundingData
+from settings import active_exchanges
 
 init(autoreset=True)
 
-EXCHANGE_FETCHERS = {
+_ALL_FETCHERS = {
     "Bybit":       bybit.fetch_funding_rates,
     "Binance":     binance.fetch_funding_rates,
     "Hyperliquid": hyperliquid.fetch_funding_rates,
     "AsterDex":    asterdex.fetch_funding_rates,
     "Bitget":      bitget.fetch_funding_rates,
 }
+EXCHANGE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchanges()}
 
 
 # ── Fetch ─────────────────────────────────────────────────────────────────────

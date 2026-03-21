@@ -8,6 +8,7 @@ Endpoints:
   fundingFeeInterval is per-pair (e.g. 8h for most, 4h for some like VANRY).
   We read it directly from the API — never hardcode.
 """
+import time
 import requests
 from typing import List, Optional
 from .base import FundingData
@@ -56,9 +57,11 @@ def fetch_funding_rates() -> List[FundingData]:
             continue
 
         try:
-            funding_rate = float(c.get("fundingFeeRate") or 0)
-            next_ts      = int(c.get("nextFundingRateTime") or 0)
-            mark_price   = float(c.get("markPrice") or 0)
+            funding_rate    = float(c.get("fundingFeeRate") or 0)
+            remaining_ms    = int(c.get("nextFundingRateTime") or 0)
+            # KuCoin returns milliseconds REMAINING until next funding (not Unix ms timestamp)
+            next_ts         = (int(time.time() * 1000) + remaining_ms) if remaining_ms > 0 else 0
+            mark_price      = float(c.get("markPrice") or 0)
 
             if mark_price <= 0:
                 continue

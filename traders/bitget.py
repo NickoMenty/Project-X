@@ -155,8 +155,8 @@ class BitgetTrader(BaseTrader):
 
     def _close(self, symbol: str, side: str, qty: float) -> TradeResult:
         """
-        Close a position — tries hedge-mode first (tradeSide=close),
-        falls back to one-way mode (reduceOnly=YES) if the exchange rejects it.
+        Close a position — tries hedge-mode place-order first, falls back to
+        the dedicated close-positions endpoint for one-way mode accounts.
         """
         raw = self.fmt_symbol(symbol)
         self._load_lot_info(raw)
@@ -186,19 +186,22 @@ class BitgetTrader(BaseTrader):
             if "22002" not in msg and "40774" not in msg and "no position" not in msg.lower():
                 raise
 
-        # One-way mode fallback: plain opposite-side order (no tradeSide, no reduceOnly)
-        resp = self._post("/api/v2/mix/order/place-order", {
+        # One-way mode fallback: dedicated flash-close endpoint (no marginMode/tradeSide needed)
+        hold_side = "long" if side == "sell" else "short"
+        resp = self._post("/api/v2/mix/order/close-positions", {
             "symbol": raw,
             "productType": "usdt-futures",
-            "marginCoin": "USDT",
-            "marginMode": "isolated",
+            "holdSide": hold_side,
             "size": str(qty_r),
-            "side": side,
-            "orderType": "market",
         })
-        oid = str(resp.get("orderId", ""))
+        # close-positions returns {"successList": [...], "failureList": [...]}
+        failures = resp.get("failureList", [])
+        if failures:
+            raise RuntimeError(f"Bitget close-positions failed: {failures}")
+        success = resp.get("successList", [{}])
+        oid = success[0].get("orderId", "") if success else ""
         return TradeResult(self.exchange_name, symbol, raw, side, qty_r, 0,
-                           0, 1, order_id=oid)
+                           0, 1, order_id=str(oid))
 
     def open_long(self, symbol, notional_usd, mark_price, leverage):
         return self._place(symbol, "buy", "open", notional_usd, mark_price, leverage)

@@ -439,9 +439,11 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     init_traders()
 
     if not DRY_RUN and RUN_CONNECTIVITY_TEST:
-        print(Style.BRIGHT + "\n  ── ORDER CONNECTIVITY TEST ($11 BTC long → close) ──\n" + Style.RESET_ALL)
+        from real_trader import TEST_ORDER_NOTIONAL, TEST_ORDER_SYMBOL
+        test_desc = f"${TEST_ORDER_NOTIONAL:.0f} {TEST_ORDER_SYMBOL} long → close"
+        print(Style.BRIGHT + f"\n  ── ORDER CONNECTIVITY TEST ({test_desc}) ──\n" + Style.RESET_ALL)
         test_results = run_order_connectivity_test(startup_data)
-        tg_lines = ["<b>🧪 ORDER CONNECTIVITY TEST</b>  ($11 BTC long → close)"]
+        tg_lines = [f"<b>🧪 ORDER CONNECTIVITY TEST</b>  ({test_desc})"]
         for ex, (ok, msg) in test_results.items():
             icon = "✅" if ok else "❌"
             status = Fore.GREEN + "✓" + Style.RESET_ALL if ok else Fore.RED + "✗" + Style.RESET_ALL
@@ -641,10 +643,11 @@ def _run_pre_epoch_scan(
     passing, failing = score_all_spikes(records)
 
     secs_to = max(0.0, (event_ts_ms - time.time() * 1000) / 1000)
+    done_str = datetime.now(timezone.utc).strftime("%H:%M:%S.%f UTC")
     print(
         Fore.YELLOW + Style.BRIGHT +
         f"  PRE-EPOCH SCAN  |  fetch: {elapsed:.2f}s  |  "
-        f"{Fore.GREEN}{len(passing)} passing{Fore.YELLOW}  |  T-{secs_to:.0f}s to epoch"
+        f"{Fore.GREEN}{len(passing)} passing{Fore.YELLOW}  |  T-{secs_to:.0f}s to epoch  |  done {done_str}"
         + Style.RESET_ALL
     )
     print(Fore.YELLOW + Style.BRIGHT + "═" * 110 + Style.RESET_ALL)

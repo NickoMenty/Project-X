@@ -113,17 +113,9 @@ class KuCoinTrader(BaseTrader):
         return float(data.get("availableBalance", 0))
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
-        kc_sym = self._kc_symbol(symbol)
-        for lev in [leverage, 5]:
-            try:
-                self._post("/api/v1/position/risk-limit-level/change", {
-                    "symbol": kc_sym,
-                })
-                # KuCoin sets leverage per order; nothing to set globally
-                return lev
-            except Exception:
-                continue
-        return 5
+        # KuCoin leverage is set per-order via the "leverage" field in the payload.
+        # There is no global set-leverage endpoint — return the requested value directly.
+        return leverage
 
     def _place(self, symbol: str, side: str, notional_usd: float,
                mark_price: float, leverage: int,

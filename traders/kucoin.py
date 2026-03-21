@@ -132,12 +132,13 @@ class KuCoinTrader(BaseTrader):
         lots = close_lots if close_lots else self._lots(symbol, notional_usd, mark_price)
 
         payload: dict = {
-            "clientOid": str(uuid.uuid4()),
-            "symbol":    kc_sym,
-            "side":      side,
-            "type":      "market",
-            "leverage":  str(leverage),
-            "size":      lots,
+            "clientOid":  str(uuid.uuid4()),
+            "symbol":     kc_sym,
+            "side":       side,
+            "type":       "market",
+            "leverage":   str(leverage),
+            "size":       lots,
+            "marginMode": "CROSS",
         }
         if reduce_only:
             payload["reduceOnly"] = True

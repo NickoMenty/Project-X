@@ -130,9 +130,9 @@ class OKXTrader(BaseTrader):
             try:
                 for pos_side in ("long", "short"):
                     self._post("/api/v5/account/set-leverage", {
-                        "instId": inst_id,
-                        "lever":  str(lev),
-                        "mgnMode": "isolated",
+                        "instId":  inst_id,
+                        "lever":   str(lev),
+                        "mgnMode": "cross",
                         "posSide": pos_side,
                     })
                 return lev
@@ -148,7 +148,7 @@ class OKXTrader(BaseTrader):
 
         payload = {
             "instId":  inst_id,
-            "tdMode":  "isolated",
+            "tdMode":  "cross",
             "posSide": pos_side,
             "side":    side,
             "ordType": "market",

@@ -129,6 +129,8 @@ def init_traders():
     from traders.bitget import BitgetTrader
     from traders.asterdex import AsterDexTrader
     from traders.hyperliquid import HyperliquidTrader
+    from traders.okx import OKXTrader
+    from traders.kucoin import KuCoinTrader
 
     enabled = set(active_exchanges())
     loaded = {}
@@ -162,6 +164,12 @@ def init_traders():
             _try("Hyperliquid", lambda: HyperliquidTrader(os.environ["HYPERLIQUID_API"]))
         except ImportError:
             print(f"  {'Hyperliquid':14s} {Fore.YELLOW}⚠ eth-account not installed — run: pip install eth-account{Style.RESET_ALL}")
+
+    _try("OKX", lambda: OKXTrader(
+        os.environ["OKX_KEY"], os.environ["OKX_SECRET"], os.environ["OKX_PASS"]))
+
+    _try("KuCoin", lambda: KuCoinTrader(
+        os.environ["KUCOIN_KEY"], os.environ["KUCOIN_SECRET"], os.environ["KUCOIN_PASS"]))
 
     _traders.update(loaded)
     return loaded

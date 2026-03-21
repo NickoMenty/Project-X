@@ -58,6 +58,8 @@ TAKER_FEE_PCT: Dict[str, float] = {
     "Hyperliquid": 0.035,   # published non-VIP perps taker
     "AsterDex":    0.050,   # ⚠ verify — using conservative default
     "Bitget":      0.060,   # standard non-VIP futures taker
+    "OKX":         0.050,   # standard non-VIP futures taker
+    "KuCoin":      0.060,   # standard non-VIP futures taker
 }
 DEFAULT_TAKER_FEE_PCT: float = 0.050
 

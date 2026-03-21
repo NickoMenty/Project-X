@@ -1,8 +1,9 @@
 """
 Binance USDT-M Futures Funding Rate Fetcher
-Endpoint: GET https://fapi.binance.com/fapi/v1/premiumIndex
-Funding interval: 8 hours (00:00, 08:00, 16:00 UTC) standard
-                  Some pairs use 4h — nextFundingTime field used.
+Endpoints:
+  GET https://fapi.binance.com/fapi/v1/premiumIndex   — rates, mark prices, next funding ts
+  GET https://fapi.binance.com/fapi/v1/fundingInfo    — per-pair fundingIntervalHours (1h/4h/8h)
+  GET https://fapi.binance.com/fapi/v1/exchangeInfo   — active TRADING symbols filter
 """
 import requests
 import time
@@ -36,18 +37,31 @@ def _fetch_active_symbols() -> set:
         return set()  # if this fails, don't filter (fail open)
 
 
+def _fetch_funding_intervals() -> dict:
+    """Return {symbol: interval_hours} from /fapi/v1/fundingInfo."""
+    try:
+        resp = requests.get(f"{BASE_URL}/fapi/v1/fundingInfo", timeout=10)
+        resp.raise_for_status()
+        return {
+            item["symbol"]: float(item.get("fundingIntervalHours") or 8)
+            for item in resp.json()
+            if item.get("symbol")
+        }
+    except Exception:
+        return {}
+
+
 def fetch_funding_rates() -> List[FundingData]:
     """
     Fetch all USDT-M perpetual funding rates from Binance Futures.
     Only includes contracts with status=TRADING (excludes SETTLING/delisted).
-    No API key required for these endpoints.
+    Per-pair interval read from fundingInfo — never hardcoded.
     """
-    active = _fetch_active_symbols()
-
-    url = f"{BASE_URL}/fapi/v1/premiumIndex"
+    active    = _fetch_active_symbols()
+    intervals = _fetch_funding_intervals()   # {symbol: hours}
 
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(f"{BASE_URL}/fapi/v1/premiumIndex", timeout=10)
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as e:
@@ -55,16 +69,13 @@ def fetch_funding_rates() -> List[FundingData]:
         return []
 
     results = []
-    now_ms = int(time.time() * 1000)
 
     for t in data:
         raw_symbol = t.get("symbol", "")
 
-        # Only USDT-margined perpetuals
         if not raw_symbol.endswith("USDT"):
             continue
 
-        # Skip contracts not actively trading (e.g. SETTLING, delisted)
         if active and raw_symbol not in active:
             continue
 
@@ -73,17 +84,12 @@ def fetch_funding_rates() -> List[FundingData]:
             continue
 
         try:
-            funding_rate = float(t.get("lastFundingRate") or 0)
-            mark_price = float(t.get("markPrice") or 0)
-            next_funding_ts = int(t.get("nextFundingTime") or 0)  # ms
+            funding_rate    = float(t.get("lastFundingRate") or 0)
+            mark_price      = float(t.get("markPrice") or 0)
+            next_funding_ts = int(t.get("nextFundingTime") or 0)
 
-            ms_to_next = next_funding_ts - now_ms if next_funding_ts > now_ms else 0
-
-            # Binance standard is 8h; some pairs are 4h
-            if ms_to_next <= 4 * 3600 * 1000:
-                interval_hours = 4.0
-            else:
-                interval_hours = 8.0
+            # Per-pair interval from fundingInfo; fall back to 8h if missing
+            interval_hours = intervals.get(raw_symbol, 8.0)
 
             annualized = funding_rate * (8760 / interval_hours) * 100
 

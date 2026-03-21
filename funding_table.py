@@ -28,7 +28,7 @@ from typing import Dict, List, Optional
 from colorama import init, Fore, Style
 from tabulate import tabulate
 
-from exchanges import bybit, binance, hyperliquid, asterdex, bitget
+from exchanges import bybit, binance, hyperliquid, asterdex, bitget, okx, kucoin
 from exchanges.base import FundingData
 from settings import active_exchanges
 
@@ -40,6 +40,8 @@ _ALL_FETCHERS = {
     "Hyperliquid": hyperliquid.fetch_funding_rates,
     "AsterDex":    asterdex.fetch_funding_rates,
     "Bitget":      bitget.fetch_funding_rates,
+    "OKX":         okx.fetch_funding_rates,
+    "KuCoin":      kucoin.fetch_funding_rates,
 }
 EXCHANGE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchanges()}
 

@@ -2,28 +2,26 @@
 AsterDex Perpetuals Funding Rate Fetcher
 AsterDex uses a Binance-compatible API structure.
 
-Endpoints to try (in order of preference):
-  1. GET https://api.asterdex.com/fapi/v1/premiumIndex   (Binance-compat)
-  2. GET https://api.asterdex.com/fapi/v1/ticker/price   (fallback for prices)
-
-Funding interval: 8 hours (matches Binance-style default)
+Endpoints:
+  GET {base}/fapi/v1/fundingInfo    — fundingIntervalHours per pair (1h/4h/8h)
+  GET {base}/fapi/v1/premiumIndex   — rates, mark prices, nextFundingTime
 
 NOTE: AsterDex is a newer exchange — if the primary endpoint fails,
       a fallback URL is attempted. Update BASE_URLS if the domain changes.
 """
 import requests
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 from .base import FundingData
 
 
 # Try primary, then fallback
 BASE_URLS = [
+    "https://fapi.asterdex.com",
     "https://api.asterdex.com",
     "https://www.asterdex.com",
 ]
 EXCHANGE_NAME = "AsterDex"
-INTERVAL_HOURS = 8.0
 
 
 def _normalize_symbol(raw: str) -> Optional[str]:
@@ -40,6 +38,19 @@ def _try_fetch(url: str) -> Optional[dict]:
         return resp.json()
     except requests.RequestException:
         return None
+
+
+def _fetch_funding_intervals() -> Dict[str, float]:
+    """Return {symbol: interval_hours} from /fapi/v1/fundingInfo."""
+    for base in BASE_URLS:
+        data = _try_fetch(f"{base}/fapi/v1/fundingInfo")
+        if data is not None and isinstance(data, list):
+            return {
+                item["symbol"]: float(item.get("fundingIntervalHours") or 8)
+                for item in data
+                if item.get("symbol")
+            }
+    return {}
 
 
 def _fetch_active_symbols() -> set:
@@ -60,8 +71,10 @@ def fetch_funding_rates() -> List[FundingData]:
     Fetch all perpetual funding rates from AsterDex.
     Tries multiple base URLs for resilience.
     Only includes contracts with status=TRADING (excludes SETTLING/PENDING_TRADING).
+    Per-pair interval read from fundingInfo — never hardcoded.
     """
-    active = _fetch_active_symbols()
+    active    = _fetch_active_symbols()
+    intervals = _fetch_funding_intervals()   # {symbol: hours}
 
     data = None
     for base in BASE_URLS:
@@ -105,7 +118,10 @@ def fetch_funding_rates() -> List[FundingData]:
                 next_boundary = (int(now_ms / 1000) // (8 * 3600) + 1) * (8 * 3600)
                 next_funding_ts = next_boundary * 1000
 
-            annualized = funding_rate * (8760 / INTERVAL_HOURS) * 100
+            # Per-pair interval from fundingInfo; fall back to 8h if missing
+            interval_hours = intervals.get(raw_symbol, 8.0)
+
+            annualized = funding_rate * (8760 / interval_hours) * 100
 
             results.append(
                 FundingData(
@@ -116,7 +132,7 @@ def fetch_funding_rates() -> List[FundingData]:
                     funding_rate_pct=funding_rate * 100,
                     mark_price=mark_price,
                     next_funding_ts=next_funding_ts,
-                    interval_hours=INTERVAL_HOURS,
+                    interval_hours=interval_hours,
                     annualized_rate=annualized,
                 )
             )

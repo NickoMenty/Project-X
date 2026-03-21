@@ -22,6 +22,8 @@ FUNDING_HOURS: Dict[str, List[int]] = {
     "AsterDex":    [0, 8, 16],
     "Bitget":      [0, 8, 16],
     "Hyperliquid": list(range(24)),   # every hour
+    "OKX":         [0, 8, 16],
+    "KuCoin":      [4, 12, 20],
 }
 
 
@@ -73,3 +75,50 @@ def seconds_to_next_joint(ex_a: str, ex_b: str) -> Optional[float]:
     if ts is None:
         return None
     return max(0.0, (ts - time.time() * 1000) / 1000.0)
+
+
+# ── CLI display ───────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Show funding schedule per exchange")
+    parser.add_argument("--exchange", nargs="+", metavar="NAME",
+                        help="Filter to specific exchange(s), e.g. --exchange OKX KuCoin")
+    args = parser.parse_args()
+
+    filter_set = {e.strip() for e in args.exchange} if args.exchange else None
+    # Case-insensitive match
+    if filter_set:
+        matched = {ex for ex in FUNDING_HOURS if ex.lower() in {f.lower() for f in filter_set}}
+        unknown = {f for f in filter_set if f.lower() not in {ex.lower() for ex in FUNDING_HOURS}}
+        if unknown:
+            print(f"  Unknown exchange(s): {', '.join(sorted(unknown))}")
+            print(f"  Known: {', '.join(sorted(FUNDING_HOURS))}")
+        exchanges = sorted(matched)
+    else:
+        exchanges = sorted(FUNDING_HOURS.keys())
+
+    print()
+    print("  FUNDING HOURS PER EXCHANGE (UTC)")
+    print("  " + "─" * 50)
+    for ex in exchanges:
+        hours = FUNDING_HOURS[ex]
+        formatted = "  ".join(f"{h:02d}:00" for h in hours)
+        count = len(hours)
+        interval = f"every {24 // count}h" if 24 % count == 0 else "variable"
+        print(f"  {ex:<14}  [{interval}]  {formatted}")
+
+    print()
+    print("  JOINT FUNDING WINDOWS")
+    print("  " + "─" * 50)
+    for i, ex_a in enumerate(exchanges):
+        for ex_b in exchanges[i + 1:]:
+            shared = joint_hours(ex_a, ex_b)
+            if shared:
+                nxt = next_joint_event_utc(ex_a, ex_b)
+                nxt_str = nxt.strftime("%H:%M UTC") if nxt else "—"
+                hrs = "  ".join(f"{h:02d}:00" for h in shared)
+                print(f"  {ex_a:<14} × {ex_b:<14}  {len(shared)} shared → next: {nxt_str}  ({hrs})")
+            else:
+                print(f"  {ex_a:<14} × {ex_b:<14}  ✗ no overlap")
+    print()

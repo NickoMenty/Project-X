@@ -1,12 +1,14 @@
 """
 Bybit Futures Funding Rate Fetcher
-Endpoint: GET https://api.bybit.com/v5/market/tickers?category=linear
-Funding interval: 8 hours (00:00, 08:00, 16:00 UTC) for most pairs
-                  Some newer pairs fund every 4h or 1h — nextFundingTime field used.
+Endpoints:
+  GET https://api.bybit.com/v5/market/instruments-info?category=linear&limit=1000
+    Returns fundingInterval (minutes) per instrument — fetched first.
+  GET https://api.bybit.com/v5/market/tickers?category=linear
+    Returns fundingRate, markPrice, nextFundingTime per instrument.
 """
 import requests
 import time
-from typing import List, Optional
+from typing import Dict, List, Optional
 from .base import FundingData
 
 
@@ -22,16 +24,38 @@ def _normalize_symbol(raw: str) -> Optional[str]:
     return None
 
 
+def _fetch_funding_intervals() -> Dict[str, float]:
+    """Return {symbol: interval_hours} from instruments-info (fundingInterval in minutes)."""
+    try:
+        resp = requests.get(
+            f"{BASE_URL}/v5/market/instruments-info",
+            params={"category": "linear", "limit": 1000},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        items = resp.json().get("result", {}).get("list", [])
+        return {
+            item["symbol"]: float(item["fundingInterval"]) / 60.0
+            for item in items
+            if item.get("symbol") and item.get("fundingInterval")
+        }
+    except Exception:
+        return {}
+
+
 def fetch_funding_rates() -> List[FundingData]:
     """
     Fetch all linear (USDT-margined) perpetual funding rates from Bybit.
-    Returns a list of normalized FundingData objects.
+    Per-pair interval read from instruments-info — never inferred from timing.
     """
-    url = f"{BASE_URL}/v5/market/tickers"
-    params = {"category": "linear"}
+    intervals = _fetch_funding_intervals()   # {symbol: hours}
 
     try:
-        resp = requests.get(url, params=params, timeout=10)
+        resp = requests.get(
+            f"{BASE_URL}/v5/market/tickers",
+            params={"category": "linear"},
+            timeout=10,
+        )
         resp.raise_for_status()
         data = resp.json()
     except requests.RequestException as e:
@@ -43,12 +67,9 @@ def fetch_funding_rates() -> List[FundingData]:
         return []
 
     results = []
-    tickers = data.get("result", {}).get("list", [])
-
-    for t in tickers:
+    for t in data.get("result", {}).get("list", []):
         raw_symbol = t.get("symbol", "")
 
-        # Only process USDT perpetuals
         if not raw_symbol.endswith("USDT"):
             continue
 
@@ -57,23 +78,12 @@ def fetch_funding_rates() -> List[FundingData]:
             continue
 
         try:
-            funding_rate = float(t.get("fundingRate") or 0)
-            mark_price = float(t.get("markPrice") or 0)
-            next_funding_ts = int(t.get("nextFundingTime") or 0)  # ms
+            funding_rate    = float(t.get("fundingRate") or 0)
+            mark_price      = float(t.get("markPrice") or 0)
+            next_funding_ts = int(t.get("nextFundingTime") or 0)
 
-            # Derive interval from next funding time vs now
-            # Bybit default is 8h; some pairs are 4h or 1h
-            now_ms = int(time.time() * 1000)
-            ms_to_next = next_funding_ts - now_ms if next_funding_ts > now_ms else 0
-
-            # Bybit funding intervals are always a divisor of 8h
-            # We infer by checking which standard interval the next timestamp aligns with
-            if ms_to_next <= 1 * 3600 * 1000:
-                interval_hours = 1.0
-            elif ms_to_next <= 4 * 3600 * 1000:
-                interval_hours = 4.0
-            else:
-                interval_hours = 8.0
+            # Per-pair interval from instruments-info; fall back to 8h if missing
+            interval_hours = intervals.get(raw_symbol, 8.0)
 
             annualized = funding_rate * (8760 / interval_hours) * 100
 

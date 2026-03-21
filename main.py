@@ -30,7 +30,7 @@ from tabulate import tabulate
 from colorama import init, Fore, Style
 
 from exchanges.base import FundingData
-from exchanges import bybit, binance, hyperliquid, asterdex, bitget
+from exchanges import bybit, binance, hyperliquid, asterdex, bitget, okx, kucoin
 from settings import active_exchanges
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
@@ -56,6 +56,8 @@ _ALL_FETCHERS = {
     "Hyperliquid": hyperliquid.fetch_funding_rates,
     "AsterDex":    asterdex.fetch_funding_rates,
     "Bitget":      bitget.fetch_funding_rates,
+    "OKX":         okx.fetch_funding_rates,
+    "KuCoin":      kucoin.fetch_funding_rates,
 }
 
 EXCHANGE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchanges()}

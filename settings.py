@@ -15,11 +15,13 @@ When an exchange is disabled it is excluded from:
 """
 
 ENABLED_EXCHANGES: dict[str, bool] = {
-    "Binance":     True,
-    "Bybit":       True,
-    "Bitget":      True,
-    "Hyperliquid": True,
-    "AsterDex":    True,
+    "Binance":     False,
+    "Bybit":       False,
+    "Bitget":      False,
+    "Hyperliquid": False,
+    "AsterDex":    False,
+    "OKX":         False,
+    "KuCoin":      False,
 }
 
 # ── Helper ────────────────────────────────────────────────────────────────────

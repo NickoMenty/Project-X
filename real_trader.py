@@ -449,6 +449,7 @@ def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bo
             if not entry.success:
                 results[name] = (False, f"open failed: {entry.error}")
                 continue
+            time.sleep(2)  # wait for async order to settle before closing
             close = trader.close_long(TEST_ORDER_SYMBOL, entry.qty)
             if not close.success:
                 results[name] = (

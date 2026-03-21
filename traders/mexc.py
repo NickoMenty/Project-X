@@ -51,7 +51,7 @@ class MEXCTrader(BaseTrader):
                 resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, body),
                                      data=body, timeout=10)
                 if not resp.text:
-                    raise RuntimeError("Empty response body")
+                    raise RuntimeError(f"Empty response body (HTTP {resp.status_code})")
                 data = resp.json()
                 if not data.get("success", True):
                     raise RuntimeError(f"MEXC error: {data.get('message', data)}")

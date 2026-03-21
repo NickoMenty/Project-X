@@ -464,7 +464,7 @@ def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bo
                     f"close @ ${close.fill_price:,.2f}"
                 )
         except Exception as e:
-            results[name] = (False, str(e))
+            results[name] = (False, repr(e) or type(e).__name__)
 
     return results
 

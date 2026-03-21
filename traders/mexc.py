@@ -51,6 +51,7 @@ class MEXCTrader(BaseTrader):
                 resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, body),
                                      data=body, timeout=10)
                 text = resp.text.strip()
+                print(f"[MEXC DEBUG] POST {path} → HTTP {resp.status_code} body={text[:200]!r}")
                 if not text:
                     raise RuntimeError(f"Empty response (HTTP {resp.status_code})")
                 try:

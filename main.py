@@ -31,7 +31,7 @@ from colorama import init, Fore, Style
 
 from exchanges.base import FundingData
 from exchanges import bybit, binance, hyperliquid, asterdex, bitget, okx, kucoin
-from settings import active_exchanges
+from settings import active_exchanges, RUN_CONNECTIVITY_TEST
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
@@ -438,7 +438,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     print(Style.BRIGHT + "\n  ── INITIALISING EXCHANGE TRADERS ──\n" + Style.RESET_ALL)
     init_traders()
 
-    if not DRY_RUN:
+    if not DRY_RUN and RUN_CONNECTIVITY_TEST:
         print(Style.BRIGHT + "\n  ── ORDER CONNECTIVITY TEST ($11 BTC long → close) ──\n" + Style.RESET_ALL)
         test_results = run_order_connectivity_test(startup_data)
         tg_lines = ["<b>🧪 ORDER CONNECTIVITY TEST</b>  ($11 BTC long → close)"]

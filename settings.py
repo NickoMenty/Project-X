@@ -14,14 +14,19 @@ When an exchange is disabled it is excluded from:
   • session CSV logs
 """
 
+# ── Connectivity test ─────────────────────────────────────────────────────────
+# Set to False to skip the ETH round-trip order test on every startup.
+# Useful once all exchanges are confirmed working.
+RUN_CONNECTIVITY_TEST: bool = True
+
 ENABLED_EXCHANGES: dict[str, bool] = {
-    "Binance":     False,
-    "Bybit":       False,
-    "Bitget":      False,
-    "Hyperliquid": False,
-    "AsterDex":    False,
-    "OKX":         False,
-    "KuCoin":      False,
+    "Binance":     True,
+    "Bybit":       True,
+    "Bitget":      True,
+    "Hyperliquid": True,
+    "AsterDex":    True,
+    "OKX":         True,
+    "KuCoin":      True,
 }
 
 # ── Helper ────────────────────────────────────────────────────────────────────

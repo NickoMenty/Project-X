@@ -53,6 +53,7 @@ class AsterDexTrader(BaseTrader):
     def _req(self, method: str, path: str, params: dict) -> dict:
         base = self._get_base()
         params["timestamp"] = int(time.time() * 1000)
+        params.setdefault("recvWindow", 10000)
         url = f"{base}{path}?{self._sign(params)}"
         resp = requests.request(method, url, headers=self._headers(), timeout=10)
         data = resp.json()
@@ -104,7 +105,12 @@ class AsterDexTrader(BaseTrader):
             try:
                 self._req("POST", "/fapi/v1/leverage", {"symbol": raw, "leverage": lev})
                 return lev
-            except RuntimeError:
+            except RuntimeError as e:
+                msg = str(e)
+                if "-4028" in msg:  # already at this leverage value
+                    return lev
+                if "-4055" in msg:  # open position exists — use as-is
+                    return lev
                 continue
         raise RuntimeError(f"AsterDex: could not set leverage for {raw}")
 
@@ -129,7 +135,8 @@ class AsterDexTrader(BaseTrader):
             params["reduceOnly"] = "true"
 
         resp = self._req("POST", "/fapi/v1/order", params)
-        fill = float(resp.get("avgPrice") or resp.get("price") or mark_price)
+        avg = resp.get("avgPrice", "0")
+        fill = float(avg) if avg and float(avg) > 0 else float(resp.get("price") or mark_price)
         oid = str(resp.get("orderId", ""))
         return TradeResult(self.exchange_name, symbol, raw, side, qty, fill,
                            qty * fill, leverage, order_id=oid)

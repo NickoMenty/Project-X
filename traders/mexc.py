@@ -42,24 +42,42 @@ class MEXCTrader(BaseTrader):
             "Content-Type": "application/json",
         }
 
-    def _post(self, path: str, payload: dict) -> dict:
-        ts = str(int(time.time() * 1000))
-        body = json.dumps(payload)
-        resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, body),
-                             data=body, timeout=10)
-        data = resp.json()
-        if not data.get("success", True):
-            raise RuntimeError(f"MEXC error: {data.get('message', data)}")
-        return data.get("data", {}) or {}
+    def _post(self, path: str, payload: dict, retries: int = 3) -> dict:
+        last_err = None
+        for _ in range(retries):
+            try:
+                ts = str(int(time.time() * 1000))
+                body = json.dumps(payload)
+                resp = requests.post(f"{BASE}{path}", headers=self._headers(ts, body),
+                                     data=body, timeout=10)
+                if not resp.text:
+                    raise RuntimeError("Empty response body")
+                data = resp.json()
+                if not data.get("success", True):
+                    raise RuntimeError(f"MEXC error: {data.get('message', data)}")
+                return data.get("data", {}) or {}
+            except Exception as e:
+                last_err = e
+                time.sleep(0.5)
+        raise RuntimeError(f"MEXC POST {path} failed after {retries} attempts: {last_err}")
 
-    def _get(self, path: str, params: dict = {}) -> dict:
-        ts = str(int(time.time() * 1000))
-        qs = "&".join(f"{k}={v}" for k, v in params.items())
-        resp = requests.get(f"{BASE}{path}?{qs}", headers=self._headers(ts), timeout=10)
-        data = resp.json()
-        if not data.get("success", True):
-            raise RuntimeError(f"MEXC error: {data.get('message', data)}")
-        return data.get("data", {}) or {}
+    def _get(self, path: str, params: dict = {}, retries: int = 3) -> dict:
+        last_err = None
+        for _ in range(retries):
+            try:
+                ts = str(int(time.time() * 1000))
+                qs = "&".join(f"{k}={v}" for k, v in params.items())
+                resp = requests.get(f"{BASE}{path}?{qs}", headers=self._headers(ts), timeout=10)
+                if not resp.text:
+                    raise RuntimeError("Empty response body")
+                data = resp.json()
+                if not data.get("success", True):
+                    raise RuntimeError(f"MEXC error: {data.get('message', data)}")
+                return data.get("data", {}) or {}
+            except Exception as e:
+                last_err = e
+                time.sleep(0.5)
+        raise RuntimeError(f"MEXC GET {path} failed after {retries} attempts: {last_err}")
 
     # ── Instrument info ────────────────────────────────────────────────────────
 

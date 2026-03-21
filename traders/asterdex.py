@@ -62,13 +62,19 @@ class AsterDexTrader(BaseTrader):
         return f"{qs}&signature={sig}"
 
     def _headers(self) -> dict:
-        return {"X-MBX-APIKEY": self.key}
+        return {
+            "X-MBX-APIKEY": self.key,
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        }
 
     def _req(self, method: str, path: str, params: dict, retries: int = 3) -> dict:
         last_err = None
-        for _ in range(retries):
+        # Try all base URLs on each attempt to work around per-URL blocks
+        bases_to_try = BASE_URLS if self._base is None else [self._base] + [u for u in BASE_URLS if u != self._base]
+        for attempt in range(retries):
+            base = bases_to_try[attempt % len(bases_to_try)]
             try:
-                base = self._get_base()
                 params["timestamp"] = self._now_ms()
                 params.setdefault("recvWindow", 10000)
                 url = f"{base}{path}?{self._sign(params)}"
@@ -77,7 +83,7 @@ class AsterDexTrader(BaseTrader):
                 if not text:
                     raise RuntimeError(f"Empty response (HTTP {resp.status_code})")
                 if resp.status_code == 403:
-                    raise RuntimeError(f"HTTP 403 — AsterDex is blocking this server's IP: {text[:200]}")
+                    raise RuntimeError(f"HTTP 403 from {base}: {text[:200]}")
                 try:
                     data = resp.json()
                 except Exception:

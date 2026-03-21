@@ -17,6 +17,9 @@ python-dotenv>=1.0.0
 # EIP-712 signing for Hyperliquid trading (Milestone 4)
 eth-account>=0.10.0
 
+# msgpack encoding for Hyperliquid action signing (required by their SDK)
+msgpack>=1.0.0
+
 # Everything else used in this project (dataclasses, statistics, pathlib,
 # concurrent.futures, typing, json, csv, datetime, itertools, threading)
 # is Python standard library — no extra installs needed.

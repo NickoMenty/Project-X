@@ -102,29 +102,55 @@ class HyperliquidTrader(BaseTrader):
     # ── EIP-712 signing ────────────────────────────────────────────────────────
 
     def _sign_action(self, action: dict, nonce: int) -> dict:
-        import eth_account
+        """
+        Sign a Hyperliquid L1 action using the correct EIP-712 Agent struct.
 
-        # Hyperliquid uses a simplified signing: keccak256 of (action_hash, nonce, vault_address)
-        # Implemented as per their open-source SDK
-        action_bytes = json.dumps(action, separators=(",", ":")).encode()
-        nonce_bytes = nonce.to_bytes(8, "big")
-        vault_bytes = bytes(20)  # zero address for non-vault
+        Per the Hyperliquid open-source SDK:
+          1. connection_id = keccak256(msgpack(action) || uint64_be(nonce) || 0x00)
+          2. Domain separator: Exchange / version 1 / chainId 1337 / zero address
+          3. Agent struct: { source: "a" (mainnet), connectionId: bytes32 }
+          4. Final digest: keccak256(0x1901 || domain_hash || agent_hash)
+        """
+        try:
+            import msgpack as _msgpack
+        except ImportError:
+            raise ImportError("msgpack is required for Hyperliquid. Install: pip install msgpack")
 
-        import hashlib
-        msg_hash = hashlib.sha3_256(
-            b"\x19Hyperliquid SignTransaction\n" +
-            action_bytes + nonce_bytes + vault_bytes
-        ).digest()
-
+        from eth_hash.auto import keccak
         from eth_account.messages import encode_defunct
-        msg = encode_defunct(hexstr=msg_hash.hex())
+
+        # 1. connection_id
+        raw = _msgpack.packb(action, use_bin_type=True)
+        raw += nonce.to_bytes(8, "big")
+        raw += b"\x00"  # no vault address
+        connection_id = keccak(raw)
+
+        # 2. EIP-712 domain separator (Exchange, chainId=1337)
+        domain_type_hash = keccak(
+            b"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"
+        )
+        domain_hash = keccak(
+            domain_type_hash
+            + keccak(b"Exchange")
+            + keccak(b"1")
+            + (1337).to_bytes(32, "big")
+            + bytes(12) + bytes(20)   # zero address, padded to 32 bytes
+        )
+
+        # 3. Agent struct hash
+        agent_type_hash = keccak(b"Agent(string source,bytes32 connectionId)")
+        agent_hash = keccak(
+            agent_type_hash
+            + keccak(b"a")      # source = "a" for mainnet
+            + connection_id     # bytes32
+        )
+
+        # 4. Final EIP-712 digest and sign
+        final_hash = keccak(b"\x19\x01" + domain_hash + agent_hash)
+        msg = encode_defunct(hexstr=final_hash.hex())
         signed = self._account.sign_message(msg)
 
-        return {
-            "r": hex(signed.r),
-            "s": hex(signed.s),
-            "v": signed.v,
-        }
+        return {"r": hex(signed.r), "s": hex(signed.s), "v": signed.v}
 
     def _send_order(self, action: dict) -> dict:
         nonce = int(time.time() * 1000)

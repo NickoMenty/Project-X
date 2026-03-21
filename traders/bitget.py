@@ -124,12 +124,10 @@ class BitgetTrader(BaseTrader):
         raise RuntimeError(f"Bitget: could not set leverage for {raw}")
 
     def _place(self, symbol: str, side: str, trade_side: str, notional_usd: float,
-               mark_price: float, leverage: int, close_qty: float = 0.0,
-               hold_side: str = "") -> TradeResult:
+               mark_price: float, leverage: int, close_qty: float = 0.0) -> TradeResult:
         """
         side: 'buy' or 'sell'
         trade_side: 'open' or 'close'
-        hold_side: 'long' or 'short' — required by Bitget when trade_side='close'
         """
         raw = self.fmt_symbol(symbol)
         self._load_lot_info(raw)
@@ -149,13 +147,52 @@ class BitgetTrader(BaseTrader):
             "tradeSide": trade_side,
             "orderType": "market",
         }
-        if hold_side:
-            payload["holdSide"] = hold_side
         resp = self._post("/api/v2/mix/order/place-order", payload)
         oid = str(resp.get("orderId", ""))
         fill = mark_price  # Bitget market orders fill async; use mark as estimate
         return TradeResult(self.exchange_name, symbol, raw, side, qty, fill,
                            qty * fill, leverage, order_id=oid)
+
+    def _close(self, symbol: str, side: str, qty: float) -> TradeResult:
+        """
+        Close a position — tries hedge-mode first (tradeSide=close),
+        falls back to one-way mode (reduceOnly=YES) if the exchange rejects it.
+        """
+        raw = self.fmt_symbol(symbol)
+        self._load_lot_info(raw)
+
+        qty_r = self._round_qty(raw, qty)
+        err = self._check_min(raw, qty_r)
+        if err:
+            return TradeResult(self.exchange_name, symbol, raw, side, 0, 0, 0, 1, error=err)
+
+        base_payload = {
+            "symbol": raw,
+            "productType": "usdt-futures",
+            "marginCoin": "USDT",
+            "marginMode": "isolated",
+            "size": str(qty_r),
+            "side": side,
+            "orderType": "market",
+        }
+
+        # Hedge mode: tradeSide=close
+        try:
+            resp = self._post("/api/v2/mix/order/place-order",
+                              {**base_payload, "tradeSide": "close"})
+            oid = str(resp.get("orderId", ""))
+            return TradeResult(self.exchange_name, symbol, raw, side, qty_r, 0,
+                               0, 1, order_id=oid)
+        except RuntimeError as e:
+            if "22002" not in str(e) and "no position" not in str(e).lower():
+                raise
+
+        # One-way mode fallback: reduceOnly=YES
+        resp = self._post("/api/v2/mix/order/place-order",
+                          {**base_payload, "reduceOnly": "YES"})
+        oid = str(resp.get("orderId", ""))
+        return TradeResult(self.exchange_name, symbol, raw, side, qty_r, 0,
+                           0, 1, order_id=oid)
 
     def open_long(self, symbol, notional_usd, mark_price, leverage):
         return self._place(symbol, "buy", "open", notional_usd, mark_price, leverage)
@@ -164,7 +201,7 @@ class BitgetTrader(BaseTrader):
         return self._place(symbol, "sell", "open", notional_usd, mark_price, leverage)
 
     def close_long(self, symbol, qty):
-        return self._place(symbol, "sell", "close", 0, 0, 1, close_qty=qty, hold_side="long")
+        return self._close(symbol, "sell", qty)
 
     def close_short(self, symbol, qty):
-        return self._place(symbol, "buy", "close", 0, 0, 1, close_qty=qty, hold_side="short")
+        return self._close(symbol, "buy", qty)

@@ -184,7 +184,8 @@ class BitgetTrader(BaseTrader):
             return TradeResult(self.exchange_name, symbol, raw, side, qty_r, 0,
                                0, 1, order_id=oid)
         except RuntimeError as e:
-            if "22002" not in str(e) and "no position" not in str(e).lower():
+            msg = str(e)
+            if "22002" not in msg and "40774" not in msg and "no position" not in msg.lower():
                 raise
 
         # One-way mode fallback: reduceOnly=YES

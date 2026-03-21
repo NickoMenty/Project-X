@@ -58,7 +58,15 @@ class OKXTrader(BaseTrader):
                              data=body, timeout=10)
         data = resp.json()
         if data.get("code") != "0":
-            raise RuntimeError(f"OKX {data.get('code')}: {data.get('msg')}")
+            # Trade endpoints wrap the real error in data[0].sCode/sMsg
+            inner = (data.get("data") or [{}])[0]
+            s_code = inner.get("sCode", data.get("code"))
+            s_msg  = inner.get("sMsg") or data.get("msg")
+            raise RuntimeError(f"OKX {s_code}: {s_msg}")
+        # Also check inner sCode for trade order responses (code=0 but order rejected)
+        inner = (data.get("data") or [{}])[0]
+        if inner.get("sCode") and inner["sCode"] != "0":
+            raise RuntimeError(f"OKX {inner['sCode']}: {inner.get('sMsg')}")
         return data
 
     def _get(self, path: str, params: dict = {}) -> dict:

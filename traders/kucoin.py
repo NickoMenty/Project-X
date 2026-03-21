@@ -15,6 +15,7 @@ import hmac
 import json
 import math
 import time
+import uuid
 import requests
 from typing import Dict, Optional
 
@@ -131,6 +132,7 @@ class KuCoinTrader(BaseTrader):
         lots = close_lots if close_lots else self._lots(symbol, notional_usd, mark_price)
 
         payload: dict = {
+            "clientOid": str(uuid.uuid4()),
             "symbol":    kc_sym,
             "side":      side,
             "type":      "market",

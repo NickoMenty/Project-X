@@ -124,10 +124,12 @@ class BitgetTrader(BaseTrader):
         raise RuntimeError(f"Bitget: could not set leverage for {raw}")
 
     def _place(self, symbol: str, side: str, trade_side: str, notional_usd: float,
-               mark_price: float, leverage: int, close_qty: float = 0.0) -> TradeResult:
+               mark_price: float, leverage: int, close_qty: float = 0.0,
+               hold_side: str = "") -> TradeResult:
         """
         side: 'buy' or 'sell'
         trade_side: 'open' or 'close'
+        hold_side: 'long' or 'short' — required by Bitget when trade_side='close'
         """
         raw = self.fmt_symbol(symbol)
         self._load_lot_info(raw)
@@ -141,12 +143,14 @@ class BitgetTrader(BaseTrader):
             "symbol": raw,
             "productType": "usdt-futures",
             "marginCoin": "USDT",
+            "marginMode": "isolated",
             "size": str(qty),
             "side": side,
             "tradeSide": trade_side,
             "orderType": "market",
         }
-        payload["marginMode"] = "isolated"
+        if hold_side:
+            payload["holdSide"] = hold_side
         resp = self._post("/api/v2/mix/order/place-order", payload)
         oid = str(resp.get("orderId", ""))
         fill = mark_price  # Bitget market orders fill async; use mark as estimate
@@ -160,7 +164,7 @@ class BitgetTrader(BaseTrader):
         return self._place(symbol, "sell", "open", notional_usd, mark_price, leverage)
 
     def close_long(self, symbol, qty):
-        return self._place(symbol, "sell", "close", 0, 0, 1, close_qty=qty)
+        return self._place(symbol, "sell", "close", 0, 0, 1, close_qty=qty, hold_side="long")
 
     def close_short(self, symbol, qty):
-        return self._place(symbol, "buy", "close", 0, 0, 1, close_qty=qty)
+        return self._place(symbol, "buy", "close", 0, 0, 1, close_qty=qty, hold_side="short")

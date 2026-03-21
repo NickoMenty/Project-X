@@ -166,20 +166,18 @@ class BitgetTrader(BaseTrader):
         if err:
             return TradeResult(self.exchange_name, symbol, raw, side, 0, 0, 0, 1, error=err)
 
-        base_payload = {
-            "symbol": raw,
-            "productType": "usdt-futures",
-            "marginCoin": "USDT",
-            "marginMode": "isolated",
-            "size": str(qty_r),
-            "side": side,
-            "orderType": "market",
-        }
-
         # Hedge mode: tradeSide=close
         try:
-            resp = self._post("/api/v2/mix/order/place-order",
-                              {**base_payload, "tradeSide": "close"})
+            resp = self._post("/api/v2/mix/order/place-order", {
+                "symbol": raw,
+                "productType": "usdt-futures",
+                "marginCoin": "USDT",
+                "marginMode": "isolated",
+                "size": str(qty_r),
+                "side": side,
+                "tradeSide": "close",
+                "orderType": "market",
+            })
             oid = str(resp.get("orderId", ""))
             return TradeResult(self.exchange_name, symbol, raw, side, qty_r, 0,
                                0, 1, order_id=oid)
@@ -188,9 +186,15 @@ class BitgetTrader(BaseTrader):
             if "22002" not in msg and "40774" not in msg and "no position" not in msg.lower():
                 raise
 
-        # One-way mode fallback: reduceOnly=YES
-        resp = self._post("/api/v2/mix/order/place-order",
-                          {**base_payload, "reduceOnly": "YES"})
+        # One-way mode fallback: plain opposite-side order (no tradeSide, no reduceOnly)
+        resp = self._post("/api/v2/mix/order/place-order", {
+            "symbol": raw,
+            "productType": "usdt-futures",
+            "marginCoin": "USDT",
+            "size": str(qty_r),
+            "side": side,
+            "orderType": "market",
+        })
         oid = str(resp.get("orderId", ""))
         return TradeResult(self.exchange_name, symbol, raw, side, qty_r, 0,
                            0, 1, order_id=oid)

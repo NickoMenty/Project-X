@@ -226,7 +226,7 @@ class HyperliquidTrader(BaseTrader):
                 action = {
                     "type": "updateLeverage",
                     "asset": asset,
-                    "isCross": False,
+                    "isCross": True,
                     "leverage": lev,
                 }
                 sig = self._sign_action(action, nonce)

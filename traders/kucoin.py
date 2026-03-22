@@ -135,13 +135,29 @@ class KuCoinTrader(BaseTrader):
         if reduce_only:
             payload["reduceOnly"] = True
 
-        resp = self._post("/api/v1/orders", payload)
-        oid = resp.get("orderId", "")
+        # 330008 = margin too tight for this quantity. Retry with progressively smaller
+        # lots until the order fits (e.g. KuCoin's effective margin rate for the symbol
+        # may be higher than 1/leverage, or available balance is partially consumed).
+        last_err: Optional[str] = None
+        for scale in (1.0, 0.75, 0.5, 0.25):
+            scaled_lots = max(1, int(lots * scale))
+            payload["clientOid"] = str(uuid.uuid4())  # fresh ID each attempt
+            payload["size"] = scaled_lots
+            try:
+                resp = self._post("/api/v1/orders", payload)
+                oid = resp.get("orderId", "")
+                mult = self._load_lot_size(kc_sym)
+                qty = scaled_lots * mult
+                if scale < 1.0:
+                    print(f"  [KuCoin] placed at {int(scale*100)}% size ({scaled_lots} lots) after margin retry")
+                return TradeResult(self.exchange_name, symbol, kc_sym, side,
+                                   qty, mark_price, qty * mark_price, leverage, order_id=str(oid))
+            except RuntimeError as e:
+                last_err = str(e)
+                if "330008" not in last_err or reduce_only:
+                    raise  # don't retry on other errors or close orders
 
-        mult = self._load_lot_size(kc_sym)
-        qty = lots * mult
-        return TradeResult(self.exchange_name, symbol, kc_sym, side,
-                           qty, mark_price, qty * mark_price, leverage, order_id=str(oid))
+        raise RuntimeError(last_err or "KuCoin: all size retries exhausted")
 
     def open_long(self, symbol, notional_usd, mark_price, leverage):
         return self._place(symbol, "buy", notional_usd, mark_price, leverage)

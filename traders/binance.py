@@ -148,3 +148,35 @@ class BinanceTrader(BaseTrader):
 
     def close_short(self, symbol, qty):
         return self._place(symbol, "BUY", 0, 0, 1, reduce_only=True, close_qty=qty)
+
+    def fetch_order_fills(self, symbol: str, order_id: str, since_ms: int, until_ms: int):
+        raw = self.fmt_symbol(symbol)
+        try:
+            params = {"symbol": raw, "startTime": since_ms, "endTime": until_ms, "limit": 100}
+            if order_id:
+                params["orderId"] = int(order_id)
+            trades = self._req("GET", "/fapi/v1/userTrades", params)
+            if not isinstance(trades, list) or not trades:
+                return None, None
+            total_qty = sum(float(t.get("qty", 0)) for t in trades)
+            if total_qty <= 0:
+                return None, None
+            avg_px = sum(float(t["price"]) * float(t["qty"]) for t in trades) / total_qty
+            total_fee = sum(float(t.get("commission", 0)) for t in trades
+                            if t.get("commissionAsset") == "USDT")
+            return avg_px, total_fee
+        except Exception:
+            return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int):
+        raw = self.fmt_symbol(symbol)
+        try:
+            data = self._req("GET", "/fapi/v1/income", {
+                "symbol": raw, "incomeType": "FUNDING_FEE",
+                "startTime": since_ms, "endTime": until_ms, "limit": 100,
+            })
+            if not isinstance(data, list) or not data:
+                return None
+            return sum(float(x.get("income", 0)) for x in data)
+        except Exception:
+            return None

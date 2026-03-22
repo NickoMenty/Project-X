@@ -31,6 +31,7 @@ _SYMBOL_MAP = {
 
 class KuCoinTrader(BaseTrader):
     exchange_name = "KuCoin"
+    FUNDING_SETTLE_WAIT_S = 30  # KuCoin settles funding with ~30s delay after epoch
 
     def __init__(self, api_key: str, api_secret: str, passphrase: str):
         self.key = api_key
@@ -179,3 +180,42 @@ class KuCoinTrader(BaseTrader):
 
     def fmt_symbol(self, symbol: str) -> str:
         return self._kc_symbol(symbol)
+
+    def fetch_order_fills(self, symbol: str, order_id: str, since_ms: int, until_ms: int):
+        kc_sym = self._kc_symbol(symbol)
+        try:
+            params = {"symbol": kc_sym}
+            if order_id:
+                params["orderId"] = order_id
+            data = self._get("/api/v1/fills", params)
+            items = data.get("items", [])
+            if not order_id:
+                items = [x for x in items
+                         if since_ms <= int(x.get("createdAt", 0)) <= until_ms]
+            if not items:
+                return None, None
+            mult = self._load_lot_size(kc_sym)
+            total_size = sum(float(x.get("size", 0)) for x in items)  # size in lots
+            if total_size <= 0:
+                return None, None
+            avg_px = sum(float(x["price"]) * float(x["size"]) for x in items) / total_size
+            total_fee = sum(abs(float(x.get("fee", 0))) for x in items)
+            return avg_px, total_fee
+        except Exception:
+            return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int):
+        kc_sym = self._kc_symbol(symbol)
+        try:
+            data = self._get("/api/v1/funding-history", {
+                "symbol": kc_sym,
+                "startAt": since_ms,
+                "endAt": until_ms,
+                "maxCount": 50,
+            })
+            items = data.get("dataList", [])
+            if not items:
+                return None
+            return sum(float(x.get("funding", 0)) for x in items)
+        except Exception:
+            return None

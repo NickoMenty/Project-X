@@ -183,3 +183,39 @@ class OKXTrader(BaseTrader):
 
     def fmt_symbol(self, symbol: str) -> str:
         return self._inst_id(symbol)
+
+    def fetch_order_fills(self, symbol: str, order_id: str, since_ms: int, until_ms: int):
+        inst_id = self._inst_id(symbol)
+        try:
+            params = {"instType": "SWAP", "instId": inst_id,
+                      "begin": str(since_ms), "end": str(until_ms), "limit": "100"}
+            if order_id:
+                params["ordId"] = order_id
+            data = self._get("/api/v5/trade/fills", params)
+            items = data.get("data", [])
+            if not items:
+                return None, None
+            total_sz = sum(float(x.get("fillSz", 0)) for x in items)
+            if total_sz <= 0:
+                return None, None
+            avg_px = sum(float(x["fillPx"]) * float(x["fillSz"]) for x in items) / total_sz
+            total_fee = sum(abs(float(x.get("fee", 0))) for x in items)
+            return avg_px, total_fee
+        except Exception:
+            return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int):
+        inst_id = self._inst_id(symbol)
+        try:
+            data = self._get("/api/v5/account/bills", {
+                "instType": "SWAP", "type": "8",
+                "instId": inst_id,
+                "begin": str(since_ms), "end": str(until_ms),
+                "limit": "100",
+            })
+            items = data.get("data", [])
+            if not items:
+                return None
+            return sum(float(x.get("balChg", 0)) for x in items)
+        except Exception:
+            return None

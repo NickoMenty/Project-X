@@ -297,3 +297,42 @@ class HyperliquidTrader(BaseTrader):
             return float(data.get(symbol, 1))
         except Exception:
             return 1.0
+
+    def fetch_order_fills(self, symbol: str, order_id: str, since_ms: int, until_ms: int):
+        try:
+            data = self._info({"type": "userFills", "user": self.address, "startTime": since_ms})
+            if not isinstance(data, list):
+                return None, None
+            fills = [x for x in data
+                     if x.get("coin") == symbol
+                     and since_ms <= x.get("time", 0) <= until_ms
+                     and (not order_id or str(x.get("oid")) == str(order_id))]
+            if not fills:
+                return None, None
+            total_sz = sum(float(x.get("sz", 0)) for x in fills)
+            if total_sz <= 0:
+                return None, None
+            avg_px = sum(float(x["px"]) * float(x["sz"]) for x in fills) / total_sz
+            total_fee = sum(abs(float(x.get("fee", 0))) for x in fills)
+            return avg_px, total_fee
+        except Exception:
+            return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int):
+        try:
+            data = self._info({"type": "userFunding", "user": self.address, "startTime": since_ms})
+            if not isinstance(data, list):
+                return None
+            total = 0.0
+            found = False
+            for item in data:
+                ts = item.get("time", 0)
+                if ts > until_ms:
+                    continue
+                delta = item.get("delta", {})
+                if delta.get("coin") == symbol:
+                    total += float(delta.get("usdc", 0))
+                    found = True
+            return total if found else None
+        except Exception:
+            return None

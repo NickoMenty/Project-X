@@ -4,6 +4,7 @@ Abstract base class for all exchange trading clients.
 import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from typing import Optional
 
 
 @dataclass
@@ -18,21 +19,22 @@ class TradeResult:
     leverage: int
     order_id: str = ""
     error: str = ""
+    fee_usd: float = 0.0        # actual fee in USDT (populated by reconcile_fills; 0 = not yet fetched)
+    fill_source: str = "est."   # "actual" once fill_price is confirmed from trade history
 
     @property
     def success(self) -> bool:
         return not self.error
-
-    @property
-    def fee_usd(self) -> float:
-        """Estimated fee — real fee should come from exchange response if available."""
-        return 0.0
 
 
 class BaseTrader(ABC):
     """Abstract interface every exchange trading client must implement."""
 
     exchange_name: str = ""
+
+    # Seconds to wait after position close before querying funding history.
+    # Most exchanges settle instantly; KuCoin has a ~30s delay.
+    FUNDING_SETTLE_WAIT_S: int = 5
 
     # ── Symbol formatting ──────────────────────────────────────────────────────
 
@@ -93,3 +95,21 @@ class BaseTrader(ABC):
     def close_short(self, symbol: str, qty: float) -> TradeResult:
         """Close an open short position (buy reduceOnly)."""
         ...
+
+    def fetch_order_fills(self, symbol: str, order_id: str,
+                          since_ms: int, until_ms: int) -> tuple:
+        """
+        Return (avg_fill_price, total_fee_usd) for the given order in [since_ms, until_ms].
+        avg_fill_price: weighted average fill price (USD)
+        total_fee_usd: total fee paid, positive = you paid
+        Returns (None, None) if unsupported or failed.
+        """
+        return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int) -> Optional[float]:
+        """
+        Return the actual funding payment (USD, signed) for symbol in [since_ms, until_ms].
+        Positive = received, negative = paid. Returns None if unsupported or failed.
+        Override in each exchange subclass.
+        """
+        return None

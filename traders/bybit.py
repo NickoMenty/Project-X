@@ -187,3 +187,38 @@ class BybitTrader(BaseTrader):
 
     def close_short(self, symbol, qty):
         return self._place(symbol, "buy", 0, 0, 1, reduce_only=True, close_qty=qty)
+
+    def fetch_order_fills(self, symbol: str, order_id: str, since_ms: int, until_ms: int):
+        raw = self.fmt_symbol(symbol)
+        try:
+            params = {"category": "linear", "symbol": raw,
+                      "startTime": str(since_ms), "endTime": str(until_ms), "limit": "100"}
+            if order_id:
+                params["orderId"] = order_id
+            result = self._get("/v5/execution/list", params)
+            items = [x for x in result.get("list", []) if x.get("execType") == "Trade"]
+            if not items:
+                return None, None
+            total_qty = sum(float(x.get("execQty", 0)) for x in items)
+            if total_qty <= 0:
+                return None, None
+            avg_px = sum(float(x["execPrice"]) * float(x["execQty"]) for x in items) / total_qty
+            total_fee = sum(abs(float(x.get("execFee", 0))) for x in items)
+            return avg_px, total_fee
+        except Exception:
+            return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int):
+        raw = self.fmt_symbol(symbol)
+        try:
+            result = self._get("/v5/account/transaction-log", {
+                "category": "linear", "type": "SETTLEMENT",
+                "symbol": raw, "startTime": str(since_ms), "endTime": str(until_ms),
+                "limit": "50",
+            })
+            items = result.get("list", [])
+            if not items:
+                return None
+            return sum(float(x.get("cashFlow") or x.get("funding") or 0) for x in items)
+        except Exception:
+            return None

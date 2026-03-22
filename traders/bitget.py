@@ -141,7 +141,7 @@ class BitgetTrader(BaseTrader):
             "symbol": raw,
             "productType": "usdt-futures",
             "marginCoin": "USDT",
-            "marginMode": "isolated",
+            "marginMode": "crossed",
             "size": str(qty),
             "side": side,
             "tradeSide": trade_side,
@@ -172,7 +172,7 @@ class BitgetTrader(BaseTrader):
                 "symbol": raw,
                 "productType": "usdt-futures",
                 "marginCoin": "USDT",
-                "marginMode": "isolated",
+                "marginMode": "crossed",
                 "size": str(qty_r),
                 "side": side,
                 "tradeSide": "close",
@@ -214,3 +214,39 @@ class BitgetTrader(BaseTrader):
 
     def close_short(self, symbol, qty):
         return self._close(symbol, "buy", qty)
+
+    def fetch_order_fills(self, symbol: str, order_id: str, since_ms: int, until_ms: int):
+        raw = self.fmt_symbol(symbol)
+        try:
+            params = {"productType": "usdt-futures", "symbol": raw,
+                      "startTime": str(since_ms), "endTime": str(until_ms), "pageSize": "100"}
+            if order_id:
+                params["orderId"] = order_id
+            data = self._get("/api/v2/mix/order/fills", params)
+            items = data if isinstance(data, list) else (data.get("fills") or data.get("list") or [])
+            if not items:
+                return None, None
+            total_qty = sum(float(x.get("baseVolume", 0)) for x in items)
+            if total_qty <= 0:
+                return None, None
+            avg_px = sum(float(x["price"]) * float(x["baseVolume"]) for x in items) / total_qty
+            total_fee = sum(abs(float(x.get("fee", 0))) for x in items)
+            return avg_px, total_fee
+        except Exception:
+            return None, None
+
+    def fetch_funding_payment(self, symbol: str, since_ms: int, until_ms: int):
+        raw = self.fmt_symbol(symbol)
+        try:
+            data = self._get("/api/v2/mix/account/bill", {
+                "productType": "usdt-futures", "symbol": raw,
+                "businessType": "contract_settle_fee",
+                "startTime": str(since_ms), "endTime": str(until_ms),
+                "pageSize": "100",
+            })
+            items = data.get("bills") if isinstance(data, dict) else (data or [])
+            if not items:
+                return None
+            return sum(float(x.get("amount", 0)) for x in items)
+        except Exception:
+            return None

@@ -86,6 +86,10 @@ class RealTrade:
     pre_balances: Dict[str, float] = field(default_factory=dict)
     post_balances: Dict[str, float] = field(default_factory=dict)
 
+    # Actual funding from exchange history (None = estimate used)
+    long_funding_actual:  Optional[float] = None
+    short_funding_actual: Optional[float] = None
+
     @property
     def entry_long_price(self) -> float:
         return self.long_entry_result.fill_price if self.long_entry_result else 0.0
@@ -422,19 +426,25 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
     actual_exit_short = (short_exit.fill_price if short_exit and short_exit.success
                          else exit_short_price)
 
-    size = trade.position_size_usd
+    # Use actual filled notional per leg (falls back to target if entry failed)
+    long_size = (trade.long_entry_result.notional_usd
+                 if trade.long_entry_result and trade.long_entry_result.notional_usd > 0
+                 else trade.position_size_usd)
+    short_size = (trade.short_entry_result.notional_usd
+                  if trade.short_entry_result and trade.short_entry_result.notional_usd > 0
+                  else trade.position_size_usd)
 
     # ── Price P&L ──────────────────────────────────────────────────────────────
     long_pnl_pct = ((actual_exit_long - trade.entry_long_price) / trade.entry_long_price * 100
                     if trade.entry_long_price else 0)
     short_pnl_pct = ((trade.entry_short_price - actual_exit_short) / trade.entry_short_price * 100
                      if trade.entry_short_price else 0)
-    trade.long_price_pnl_usd  = size * long_pnl_pct  / 100
-    trade.short_price_pnl_usd = size * short_pnl_pct / 100
+    trade.long_price_pnl_usd  = long_size  * long_pnl_pct  / 100
+    trade.short_price_pnl_usd = short_size * short_pnl_pct / 100
 
     # ── Funding P&L ────────────────────────────────────────────────────────────
-    short_funding = size * trade.short_rate_pct / 100
-    long_funding  = -size * trade.long_rate_pct / 100
+    short_funding = short_size * trade.short_rate_pct / 100
+    long_funding  = -long_size  * trade.long_rate_pct / 100
 
     if trade.primary_is_short:
         trade.funding_collected_usd = short_funding
@@ -446,13 +456,169 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
     trade.net_funding_usd = trade.funding_collected_usd + trade.funding_paid_usd
 
     # ── Fees ───────────────────────────────────────────────────────────────────
-    trade.total_fee_usd = size * (trade.long_fee_pct * 2 + trade.short_fee_pct * 2) / 100
+    trade.total_fee_usd = (long_size  * trade.long_fee_pct  * 2 / 100 +
+                           short_size * trade.short_fee_pct * 2 / 100)
 
     # ── Net ────────────────────────────────────────────────────────────────────
     trade.net_pnl_usd = (trade.long_price_pnl_usd + trade.short_price_pnl_usd
                          + trade.net_funding_usd - trade.total_fee_usd)
     trade.completed = True
     return trade
+
+
+# ── Fills reconciliation ──────────────────────────────────────────────────────
+
+def reconcile_fills(trade: RealTrade) -> None:
+    """
+    Fetch actual fill prices and fees from both exchange trade history APIs.
+    Updates fill_price, notional_usd, and fee_usd on each TradeResult, then
+    recomputes price P&L and total_fee_usd. Called after real_exit().
+    """
+    long_trader  = _traders.get(trade.long_exchange)
+    short_trader = _traders.get(trade.short_exchange)
+    if not long_trader or not short_trader:
+        return
+
+    # Small pause so exchange history APIs catch up with the just-placed orders
+    time.sleep(3)
+
+    entry_since = int(trade.entry_ts * 1000) - 5_000
+    entry_until = int(trade.entry_ts * 1000) + 30_000
+    exit_since  = int(trade.exit_ts  * 1000) - 5_000
+    exit_until  = int(trade.exit_ts  * 1000) + 30_000
+
+    results: Dict[str, tuple] = {}
+
+    def _fetch(key, trader, order_id, since, until):
+        results[key] = trader.fetch_order_fills(trade.symbol, order_id, since, until)
+
+    tasks = [
+        ("long_entry",  long_trader,
+         trade.long_entry_result.order_id  if trade.long_entry_result  else "", entry_since, entry_until),
+        ("short_entry", short_trader,
+         trade.short_entry_result.order_id if trade.short_entry_result else "", entry_since, entry_until),
+        ("long_exit",   long_trader,
+         trade.long_exit_result.order_id   if trade.long_exit_result   else "", exit_since,  exit_until),
+        ("short_exit",  short_trader,
+         trade.short_exit_result.order_id  if trade.short_exit_result  else "", exit_since,  exit_until),
+    ]
+    threads = [threading.Thread(target=_fetch, args=(k, tr, oid, s, u)) for k, tr, oid, s, u in tasks]
+    for t in threads: t.start()
+    for t in threads: t.join()
+
+    def _apply(result, key):
+        if result is None:
+            return
+        px, fee = results.get(key, (None, None))
+        if px is not None and px > 0:
+            result.fill_price    = px
+            result.notional_usd  = result.qty * px
+            result.fill_source   = "actual"
+        if fee is not None:
+            result.fee_usd = fee
+
+    _apply(trade.long_entry_result,  "long_entry")
+    _apply(trade.short_entry_result, "short_entry")
+    _apply(trade.long_exit_result,   "long_exit")
+    _apply(trade.short_exit_result,  "short_exit")
+
+    # Recompute per-leg notionals with updated entry fill prices
+    long_size = (trade.long_entry_result.notional_usd
+                 if trade.long_entry_result and trade.long_entry_result.notional_usd > 0
+                 else trade.position_size_usd)
+    short_size = (trade.short_entry_result.notional_usd
+                  if trade.short_entry_result and trade.short_entry_result.notional_usd > 0
+                  else trade.position_size_usd)
+
+    # Recompute fees: actual if available, estimate otherwise
+    def _fee(result, size, fee_pct):
+        return result.fee_usd if (result and result.fee_usd > 0) else size * fee_pct / 100
+
+    trade.total_fee_usd = (
+        _fee(trade.long_entry_result,  long_size,  trade.long_fee_pct)  +
+        _fee(trade.long_exit_result,   long_size,  trade.long_fee_pct)  +
+        _fee(trade.short_entry_result, short_size, trade.short_fee_pct) +
+        _fee(trade.short_exit_result,  short_size, trade.short_fee_pct)
+    )
+
+    # Recompute price P&L with updated fill prices
+    actual_exit_long  = (trade.long_exit_result.fill_price
+                         if trade.long_exit_result and trade.long_exit_result.success else 0)
+    actual_exit_short = (trade.short_exit_result.fill_price
+                         if trade.short_exit_result and trade.short_exit_result.success else 0)
+
+    long_pnl_pct = ((actual_exit_long - trade.entry_long_price) / trade.entry_long_price * 100
+                    if trade.entry_long_price else 0)
+    short_pnl_pct = ((trade.entry_short_price - actual_exit_short) / trade.entry_short_price * 100
+                     if trade.entry_short_price else 0)
+
+    trade.long_price_pnl_usd  = long_size  * long_pnl_pct  / 100
+    trade.short_price_pnl_usd = short_size * short_pnl_pct / 100
+    trade.net_pnl_usd = (trade.long_price_pnl_usd + trade.short_price_pnl_usd
+                         + trade.net_funding_usd - trade.total_fee_usd)
+
+
+# ── Funding reconciliation ────────────────────────────────────────────────────
+
+def reconcile_funding(trade: RealTrade) -> None:
+    """
+    Fetch actual settled funding from both exchange history APIs and update trade P&L.
+    Called after real_exit(). Waits for settlement (KuCoin needs ~30s).
+    Falls back to the rate-based estimate for any leg that returns None.
+    """
+    long_trader  = _traders.get(trade.long_exchange)
+    short_trader = _traders.get(trade.short_exchange)
+    if not long_trader or not short_trader:
+        return
+
+    # Query window: 2 min before epoch to 10 min after (captures delayed settlements)
+    since_ms = trade.funding_ts_ms - 120_000
+    until_ms = trade.funding_ts_ms + 600_000
+
+    wait_s = max(
+        getattr(long_trader,  "FUNDING_SETTLE_WAIT_S", 5),
+        getattr(short_trader, "FUNDING_SETTLE_WAIT_S", 5),
+    )
+    if wait_s > 0:
+        print(f"  ⏳ Waiting {wait_s}s for funding settlement...")
+        time.sleep(wait_s)
+
+    long_actual  = long_trader.fetch_funding_payment(trade.symbol, since_ms, until_ms)
+    short_actual = short_trader.fetch_funding_payment(trade.symbol, since_ms, until_ms)
+
+    trade.long_funding_actual  = long_actual
+    trade.short_funding_actual = short_actual
+
+    if long_actual is None and short_actual is None:
+        return  # Nothing to update — keep rate-based estimates
+
+    # Per-leg notionals (same as real_exit)
+    long_size = (trade.long_entry_result.notional_usd
+                 if trade.long_entry_result and trade.long_entry_result.notional_usd > 0
+                 else trade.position_size_usd)
+    short_size = (trade.short_entry_result.notional_usd
+                  if trade.short_entry_result and trade.short_entry_result.notional_usd > 0
+                  else trade.position_size_usd)
+
+    # Use actual where available, estimate where not
+    long_contrib  = (long_actual  if long_actual  is not None
+                     else -long_size  * trade.long_rate_pct  / 100)
+    short_contrib = (short_actual if short_actual is not None
+                     else  short_size * trade.short_rate_pct / 100)
+
+    # Apply hedge_credits model for estimated legs only
+    if trade.primary_is_short:
+        if long_actual is None and not trade.hedge_credits:
+            long_contrib = 0.0
+    else:
+        if short_actual is None and not trade.hedge_credits:
+            short_contrib = 0.0
+
+    trade.net_funding_usd       = long_contrib + short_contrib
+    trade.funding_collected_usd = max(0.0, long_contrib) + max(0.0, short_contrib)
+    trade.funding_paid_usd      = min(0.0, long_contrib) + min(0.0, short_contrib)
+    trade.net_pnl_usd = (trade.long_price_pnl_usd + trade.short_price_pnl_usd
+                         + trade.net_funding_usd - trade.total_fee_usd)
 
 
 # ── Order connectivity test ───────────────────────────────────────────────────
@@ -539,18 +705,20 @@ def print_trade_report(trade: RealTrade) -> None:
     print(Style.BRIGHT + f"  {mode} TRADE REPORT — {trade.symbol}" + Style.RESET_ALL)
     print(sep2)
 
+    def _src(result) -> str:
+        return " (actual)" if result and result.fill_source == "actual" else " (est.)"
+
     # ── Entry ─────────────────────────────────────────────────────────────────
     print(f"\n  ENTRY  [{_ts(trade.entry_ts)}]  (T-10s)  leverage: {trade.leverage_used}x")
     print(f"    Long   {trade.long_exchange:<14}  qty: {trade.long_qty:.6f}  "
-          f"fill: ${trade.entry_long_price:,.4f}")
+          f"fill: ${trade.entry_long_price:,.4f}{_src(trade.long_entry_result)}")
     print(f"    Short  {trade.short_exchange:<14}  qty: {trade.short_qty:.6f}  "
-          f"fill: ${trade.entry_short_price:,.4f}")
+          f"fill: ${trade.entry_short_price:,.4f}{_src(trade.short_entry_result)}")
     print(f"    Position size: ${trade.position_size_usd:.2f} per leg")
 
     # ── Funding ───────────────────────────────────────────────────────────────
     epoch_str = _ts(trade.funding_ts_ms / 1000)
     print(f"\n  FUNDING EPOCH  [{epoch_str}]")
-    size = trade.position_size_usd
     short_fires = trade.primary_is_short or trade.hedge_credits
     long_fires  = (not trade.primary_is_short) or trade.hedge_credits
 
@@ -561,12 +729,22 @@ def print_trade_report(trade: RealTrade) -> None:
         lbl = lbl_pos if usd >= 0 else lbl_neg
         return f"{c}{Style.BRIGHT}${usd:+.4f}{Style.RESET_ALL}  ({lbl})"
 
-    short_usd =  size * trade.short_rate_pct / 100
-    long_usd  = -size * trade.long_rate_pct  / 100
+    _long_sz  = (trade.long_entry_result.notional_usd
+                 if trade.long_entry_result and trade.long_entry_result.notional_usd > 0
+                 else trade.position_size_usd)
+    _short_sz = (trade.short_entry_result.notional_usd
+                 if trade.short_entry_result and trade.short_entry_result.notional_usd > 0
+                 else trade.position_size_usd)
+    short_usd = (trade.short_funding_actual if trade.short_funding_actual is not None
+                 else _short_sz * trade.short_rate_pct / 100)
+    long_usd  = (trade.long_funding_actual  if trade.long_funding_actual  is not None
+                 else -_long_sz * trade.long_rate_pct / 100)
+    short_tag = " (actual)" if trade.short_funding_actual is not None else " (est.)"
+    long_tag  = " (actual)" if trade.long_funding_actual  is not None else " (est.)"
     print(f"    Short  {trade.short_exchange:<14}  rate: {trade.short_rate_pct:+.4f}%  "
-          f"→  {_leg(short_usd, short_fires, 'collected', 'paid')}")
+          f"→  {_leg(short_usd, short_fires, 'collected', 'paid')}{short_tag}")
     print(f"    Long   {trade.long_exchange:<14}  rate: {trade.long_rate_pct:+.4f}%  "
-          f"→  {_leg(long_usd, long_fires, 'collected', 'paid')}")
+          f"→  {_leg(long_usd, long_fires, 'collected', 'paid')}{long_tag}")
     print(f"    {'Net funding':38}  {_pnl_color(trade.net_funding_usd)}")
 
     # ── Exit ──────────────────────────────────────────────────────────────────
@@ -580,20 +758,32 @@ def print_trade_report(trade: RealTrade) -> None:
     else:
         sp = 0
     print(f"    Long   {trade.long_exchange:<14}  "
-          f"${trade.entry_long_price:,.4f} → ${trade.exit_long_price:,.4f}  "
+          f"${trade.entry_long_price:,.4f}{_src(trade.long_entry_result)} → "
+          f"${trade.exit_long_price:,.4f}{_src(trade.long_exit_result)}  "
           f"({lp:+.4f}%)  {_pnl_color(trade.long_price_pnl_usd)}")
     print(f"    Short  {trade.short_exchange:<14}  "
-          f"${trade.entry_short_price:,.4f} → ${trade.exit_short_price:,.4f}  "
+          f"${trade.entry_short_price:,.4f}{_src(trade.short_entry_result)} → "
+          f"${trade.exit_short_price:,.4f}{_src(trade.short_exit_result)}  "
           f"({sp:+.4f}%)  {_pnl_color(trade.short_price_pnl_usd)}")
     print(f"    {'Price P&L combined':38}  "
           f"{_pnl_color(trade.long_price_pnl_usd + trade.short_price_pnl_usd)}")
 
     # ── Fees ──────────────────────────────────────────────────────────────────
+    def _fee_str(entry_r, exit_r, size, fee_pct):
+        e_fee = entry_r.fee_usd if (entry_r and entry_r.fee_usd > 0) else size * fee_pct / 100
+        c_fee = exit_r.fee_usd  if (exit_r  and exit_r.fee_usd  > 0) else size * fee_pct / 100
+        e_tag = "(actual)" if (entry_r and entry_r.fee_usd > 0) else "(est.)"
+        c_tag = "(actual)" if (exit_r  and exit_r.fee_usd  > 0) else "(est.)"
+        return (f"open ${e_fee:.4f} {e_tag}  close ${c_fee:.4f} {c_tag}  "
+                f"= {Fore.RED}${e_fee + c_fee:.4f}{Style.RESET_ALL}")
+
     print(f"\n  FEES")
-    print(f"    Long   {trade.long_exchange:<14}  {trade.long_fee_pct:.3f}% × 2 (o+c) = "
-          f"{Fore.RED}${size * trade.long_fee_pct * 2 / 100:.4f}{Style.RESET_ALL}")
-    print(f"    Short  {trade.short_exchange:<14}  {trade.short_fee_pct:.3f}% × 2 (o+c) = "
-          f"{Fore.RED}${size * trade.short_fee_pct * 2 / 100:.4f}{Style.RESET_ALL}")
+    print(f"    Long   {trade.long_exchange:<14}  "
+          + _fee_str(trade.long_entry_result,  trade.long_exit_result,
+                     _long_sz, trade.long_fee_pct))
+    print(f"    Short  {trade.short_exchange:<14}  "
+          + _fee_str(trade.short_entry_result, trade.short_exit_result,
+                     _short_sz, trade.short_fee_pct))
     print(f"    {'Total fees':38}  {Fore.RED}${trade.total_fee_usd:.4f}{Style.RESET_ALL}")
 
     # ── Balances ───────────────────────────────────────────────────────────────

@@ -664,10 +664,10 @@ def _run_pre_epoch_scan(
     # (e.g. Binance+Hyperliquid at 12:00 UTC) while the highest-scoring pair
     # (e.g. Bybit+MEXC) doesn't credit until 16:00 UTC. Entering that trade
     # would mean no funding is collected at the 12:00 epoch.
-    passing_now = [o for o in passing if o.seconds_to_funding <= 30.0]
+    passing_now = [o for o in passing if o.seconds_to_funding <= 75.0]
     if not passing_now:
         msg = (
-            f"⏭ Scan skipped trade — no passing pair has funding within 30s of this trigger.\n"
+            f"⏭ Scan skipped trade — no passing pair has funding within 75s of this trigger.\n"
             + "\n".join(
                 f"  {o.symbol} L:{o.long_exchange} S:{o.short_exchange} "
                 f"T-{o.seconds_to_funding:.0f}s"
@@ -675,7 +675,7 @@ def _run_pre_epoch_scan(
             )
         )
         print(f"\n  {Fore.YELLOW}No passing pairs have a joint funding event "
-              f"within 30s of this trigger — skipping trade.{Style.RESET_ALL}")
+              f"within 75s of this trigger — skipping trade.{Style.RESET_ALL}")
         send_alert(msg)
         return
 

@@ -497,13 +497,13 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
         if once:
             break
 
-        # ── Smart sleep: wake at T-15s before the nearest joint funding event ──
+        # ── Smart sleep: wake at T-60s before the nearest joint funding event ──
         now_ms = time.time() * 1000
         cycle_end_ms = now_ms + interval * 1000
         next_event = _next_primary_event_ms(records) if not no_score else None
-        prescan_ms = (next_event - 15_000) if next_event else None
+        prescan_ms = (next_event - 60_000) if next_event else None
 
-        # Fire pre-scan if: T-15s hasn't passed yet, event is within 2 cycles
+        # Fire pre-scan if: T-60s hasn't passed yet, event is within 2 cycles
         # (handles the case where T-15s falls just past the cycle boundary),
         # and we haven't already scanned this exact event.
         if (
@@ -621,9 +621,9 @@ def _run_pre_epoch_scan(
     export_info: Optional[dict],
 ) -> None:
     """
-    Full Milestone 3 execution sequence triggered 15s before a joint funding event:
+    Full Milestone 3 execution sequence triggered 60s before a joint funding event:
 
-      T-15s  this function is called — fresh fetch + score
+      T-60s  this function is called — fresh fetch + score
       T-10s  simulate entry on best passing opportunity (if any)
       T+0    funding epoch fires on exchanges
       T+EXIT_WAIT_SECONDS  fetch exit prices, simulate close, print P&L report

@@ -55,6 +55,10 @@ class HyperliquidTrader(BaseTrader):
         explicit = os.getenv("HYPERLIQUID_ADDRESS", "").strip()
         self.address = explicit if explicit else self._resolve_main_account()
 
+        # Verify the resolved address has an active account. Catches expired/missing
+        # API wallet authorizations at startup rather than mid-trade.
+        self._verify_account()
+
     def fmt_symbol(self, symbol: str) -> str:
         return symbol  # Hyperliquid uses bare symbols like "BTC"
 
@@ -74,6 +78,31 @@ class HyperliquidTrader(BaseTrader):
             pass
         # Fall back to the API wallet address itself (works if using main wallet key)
         return self.api_wallet_address
+
+    def _verify_account(self):
+        """
+        Confirm the API wallet is registered and authorized on Hyperliquid.
+        Raises RuntimeError at init time if the wallet has expired or was never set up.
+        Hyperliquid API wallet authorizations expire after ~90 days — re-authorize at
+        https://app.hyperliquid.xyz under Settings → API Wallets.
+        """
+        try:
+            data = requests.post(INFO_URL, json={
+                "type": "agentState",
+                "user": self.api_wallet_address,
+            }, timeout=10).json()
+            # A registered API wallet has a non-empty parentAccount
+            parent = data.get("parentAccount") or data.get("parent")
+            if not parent:
+                raise RuntimeError(
+                    f"Hyperliquid API wallet {self.api_wallet_address} is not authorized "
+                    f"for any account. Go to https://app.hyperliquid.xyz → Settings → "
+                    f"API Wallets and re-authorize it (authorizations expire after ~90 days)."
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            pass  # Network failure at init — let it proceed, error will surface on first order
 
     def _info(self, payload: dict) -> dict:
         resp = requests.post(INFO_URL, json=payload, timeout=10)

@@ -125,9 +125,12 @@ class HyperliquidTrader(BaseTrader):
             raise RuntimeError(f"Hyperliquid: unknown symbol {symbol}")
         return self._asset_cache[symbol]
 
-    def _round_sz(self, symbol: str, qty: float) -> float:
+    def _round_sz(self, symbol: str, qty: float):
+        """Return qty rounded to szDecimals. Returns int for szDecimals=0, float otherwise."""
         self._load_meta()
         decimals = self._sz_decimals.get(symbol, 2)
+        if decimals == 0:
+            return int(qty)
         factor = 10 ** decimals
         return int(qty * factor) / factor
 

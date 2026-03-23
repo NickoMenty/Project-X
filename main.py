@@ -18,6 +18,7 @@ Usage:
 """
 
 import argparse
+import threading
 import time
 import os
 import sys
@@ -65,21 +66,58 @@ _ACTIVE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchan
 ALL_EXCHANGES = list(_ACTIVE_FETCHERS.keys())
 
 
+def _fetch_live_prices(exchanges: set) -> dict:
+    """
+    Fetch mark prices from the live exchange APIs for the given exchange names.
+    Returns {exchange: {symbol: mark_price}}.  Used by _make_provider() to fill
+    in missing mark_price values in MOCK_SCENARIO entries.
+    """
+    prices: dict = {}
+
+    def _fetch_one(name):
+        fn = _ALL_FETCHERS.get(name)
+        if not fn:
+            return
+        try:
+            for fd in fn():
+                prices.setdefault(name, {})[fd.symbol] = fd.mark_price
+        except Exception as e:
+            print(f"  {Fore.YELLOW}[MOCK] Could not fetch live price for {name}: {e}{Style.RESET_ALL}")
+
+    threads = [threading.Thread(target=_fetch_one, args=(ex,)) for ex in exchanges]
+    for t in threads: t.start()
+    for t in threads: t.join()
+    return prices
+
+
 def _make_provider() -> FundingRateProvider:
     """
     Return the appropriate funding rate provider for this session.
 
-    DRY_RUN=true  →  MockFundingProvider (no live API calls; configure rates in code)
+    DRY_RUN=true  →  MockFundingProvider populated from MOCK_SCENARIO in settings.py.
+                      mark_price is optional — omit it and the current live price is
+                      fetched automatically from the exchange's public API.
     DRY_RUN=false →  LiveFundingProvider (parallel HTTP fetch from all active exchanges)
     """
     if DRY_RUN:
+        # Find which exchanges need a live price lookup
+        need_price = {e["exchange"] for e in MOCK_SCENARIO if not e.get("mark_price")}
+        live_prices = _fetch_live_prices(need_price) if need_price else {}
+
         mock = MockFundingProvider()
         for entry in MOCK_SCENARIO:
+            ex, sym = entry["exchange"], entry["symbol"]
+            price = (entry.get("mark_price")
+                     or live_prices.get(ex, {}).get(sym)
+                     or 0.0)
+            if not price:
+                print(f"  {Fore.RED}[MOCK] No mark price for {ex} {sym} — entry skipped{Style.RESET_ALL}")
+                continue
             mock.add(
-                exchange       = entry["exchange"],
-                symbol         = entry["symbol"],
+                exchange       = ex,
+                symbol         = sym,
                 rate_pct       = entry["rate_pct"],
-                mark_price     = entry.get("mark_price", 100.0),
+                mark_price     = price,
                 interval_hours = entry.get("interval_hours", 8.0),
             )
         return mock

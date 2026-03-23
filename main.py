@@ -588,21 +588,22 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
         next_event = _next_primary_event_ms(records) if not no_score else None
         prescan_ms = (next_event - 60_000) if next_event else None
 
-        # Fire pre-scan if: T-60s hasn't passed yet, event is within 2 cycles
-        # (handles the case where T-15s falls just past the cycle boundary),
+        # Fire pre-scan if: epoch is still in the future, within 2 cycles,
         # and we haven't already scanned this exact event.
+        # T-60s may already be past (cycle overhead) — fire immediately in that case.
         if (
             prescan_ms
-            and prescan_ms > now_ms
+            and next_event > time.time() * 1000
             and next_event < now_ms + interval * 2 * 1000
             and next_event != last_scanned_event
         ):
-            sleep_s = (prescan_ms - time.time() * 1000) / 1000
+            sleep_s = max(0.0, (prescan_ms - time.time() * 1000) / 1000)
             print()
             print(
                 f"  {Fore.CYAN}Next joint epoch in "
                 f"{(next_event - time.time()*1000)/1000:.0f}s — "
-                f"pre-scan in {sleep_s:.0f}s  |  Ctrl+C to exit{Style.RESET_ALL}"
+                f"{'pre-scan NOW' if sleep_s < 1 else f'pre-scan in {sleep_s:.0f}s'}"
+                f"  |  Ctrl+C to exit{Style.RESET_ALL}"
             )
             if sleep_s > 0:
                 time.sleep(sleep_s)

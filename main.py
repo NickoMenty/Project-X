@@ -32,7 +32,7 @@ from colorama import init, Fore, Style
 from exchanges.base import FundingData
 from exchanges import bybit, binance, hyperliquid, asterdex, bitget, okx, kucoin
 from exchanges.provider import FundingRateProvider, LiveFundingProvider, MockFundingProvider
-from settings import active_exchanges, RUN_CONNECTIVITY_TEST
+from settings import active_exchanges, RUN_CONNECTIVITY_TEST, DRY_RUN, MOCK_SCENARIO
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
 from exporter import export_snapshot, get_history_stats
@@ -41,7 +41,7 @@ from spike_scorer import (
 )
 from real_trader import (
     real_entry, real_exit, reconcile_fills, reconcile_funding, print_trade_report,
-    EXIT_WAIT_SECONDS, DRY_RUN,
+    EXIT_WAIT_SECONDS,
     init_traders, fetch_all_balances, get_all_balances_dict,
     _traders, TARGET_LEVERAGE,
     run_order_connectivity_test,
@@ -73,7 +73,16 @@ def _make_provider() -> FundingRateProvider:
     DRY_RUN=false →  LiveFundingProvider (parallel HTTP fetch from all active exchanges)
     """
     if DRY_RUN:
-        return MockFundingProvider()
+        mock = MockFundingProvider()
+        for entry in MOCK_SCENARIO:
+            mock.add(
+                exchange       = entry["exchange"],
+                symbol         = entry["symbol"],
+                rate_pct       = entry["rate_pct"],
+                mark_price     = entry.get("mark_price", 100.0),
+                interval_hours = entry.get("interval_hours", 8.0),
+            )
+        return mock
     return LiveFundingProvider(_ACTIVE_FETCHERS)
 
 

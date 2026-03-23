@@ -64,6 +64,7 @@ class AsterDexTrader(BaseTrader):
         self.signer = self._account.address
         self._step_cache: Dict[str, float] = {}
         self._min_cache:  Dict[str, float] = {}
+        self._max_cache:  Dict[str, float] = {}
         self._nonce_sec = 0
         self._nonce_i   = 0
         self._base = self._resolve_base()
@@ -146,6 +147,8 @@ class AsterDexTrader(BaseTrader):
                 if f["filterType"] == "LOT_SIZE":
                     self._step_cache[raw] = float(f["stepSize"])
                     self._min_cache[raw]  = float(f["minQty"])
+                    if f.get("maxQty"):
+                        self._max_cache[raw] = float(f["maxQty"])
             break
         if raw not in self._step_cache:
             self._step_cache[raw] = 1.0
@@ -192,6 +195,10 @@ class AsterDexTrader(BaseTrader):
         self._load_lot_info(raw)
 
         qty = self._round_qty(raw, close_qty if reduce_only else notional_usd / mark_price)
+        max_qty = self._max_cache.get(raw, 0.0)
+        if max_qty > 0 and qty > max_qty:
+            print(f"  [AsterDex] {raw}: qty {qty} capped to maxQty {max_qty}")
+            qty = self._round_qty(raw, max_qty)
         err = self._check_min(raw, qty)
         if err:
             return TradeResult(self.exchange_name, symbol, raw, side, 0, 0, notional_usd, leverage, error=err)

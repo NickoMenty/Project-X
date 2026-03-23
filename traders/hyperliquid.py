@@ -46,6 +46,7 @@ class HyperliquidTrader(BaseTrader):
             private_key = "0x" + private_key
         self._account = Account.from_key(private_key)
         self.api_wallet_address = self._account.address
+        print(f"  [Hyperliquid] API wallet address: {self.api_wallet_address}")
         self._asset_cache: Dict[str, int] = {}   # symbol → asset index
         self._sz_decimals: Dict[str, int] = {}   # symbol → size decimals
 

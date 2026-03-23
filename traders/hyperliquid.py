@@ -155,27 +155,36 @@ class HyperliquidTrader(BaseTrader):
         raw += b"\x00"  # no vault address
         connection_id = keccak(raw)  # bytes32
 
-        # 2. EIP-712 sign — use Account class method (sign_typed_data is not on LocalAccount)
-        from eth_account import Account as _Account
-        signed = _Account.sign_typed_data(
-            self._account.key,
-            domain_data={
-                "name": "Exchange",
-                "version": "1",
+        # 2. EIP-712 sign — matches official Hyperliquid SDK exactly.
+        # EIP712Domain field ORDER matters for the type hash; must be chainId, name,
+        # verifyingContract, version (alphabetical per the SDK, not insertion order).
+        from eth_account.messages import encode_typed_data
+        signable = encode_typed_data(full_message={
+            "domain": {
                 "chainId": 1337,
+                "name": "Exchange",
                 "verifyingContract": "0x0000000000000000000000000000000000000000",
+                "version": "1",
             },
-            message_types={
-                "Agent": [
-                    {"name": "source", "type": "string"},
-                    {"name": "connectionId", "type": "bytes32"},
-                ],
-            },
-            message_data={
+            "message": {
                 "source": "a",
                 "connectionId": connection_id,
             },
-        )
+            "primaryType": "Agent",
+            "types": {
+                "EIP712Domain": [
+                    {"name": "chainId",           "type": "uint256"},
+                    {"name": "name",              "type": "string"},
+                    {"name": "verifyingContract", "type": "address"},
+                    {"name": "version",           "type": "string"},
+                ],
+                "Agent": [
+                    {"name": "source",       "type": "string"},
+                    {"name": "connectionId", "type": "bytes32"},
+                ],
+            },
+        })
+        signed = self._account.sign_message(signable)
 
         return {"r": hex(signed.r), "s": hex(signed.s), "v": signed.v}
 

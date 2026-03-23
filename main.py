@@ -66,6 +66,36 @@ _ACTIVE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchan
 ALL_EXCHANGES = list(_ACTIVE_FETCHERS.keys())
 
 
+def _parse_funding_time(time_str: str) -> int:
+    """
+    Parse a UTC funding time string → Unix milliseconds of the next occurrence.
+
+    Accepted formats:
+        "20:00:00"        HH:MM:SS
+        "20:00:00.500"    HH:MM:SS.mmm  (dot separator)
+        "20:00:00:500"    HH:MM:SS:mmm  (colon separator)
+    """
+    from datetime import datetime, timedelta, timezone
+
+    # Normalise colon-separated ms to dot: "20:00:00:500" → "20:00:00.500"
+    parts = time_str.split(":")
+    if len(parts) == 4:
+        time_str = f"{parts[0]}:{parts[1]}:{parts[2]}.{parts[3]}"
+
+    now = datetime.now(timezone.utc)
+    for fmt in ("%H:%M:%S.%f", "%H:%M:%S"):
+        try:
+            t = datetime.strptime(time_str, fmt).replace(
+                year=now.year, month=now.month, day=now.day, tzinfo=timezone.utc
+            )
+            if t <= now:
+                t += timedelta(days=1)
+            return int(t.timestamp() * 1000)
+        except ValueError:
+            continue
+    raise ValueError(f"[MOCK] Cannot parse funding_time {time_str!r} — use HH:MM:SS or HH:MM:SS.mmm")
+
+
 def _fetch_live_prices(exchanges: set) -> dict:
     """
     Fetch mark prices from the live exchange APIs for the given exchange names.
@@ -113,12 +143,19 @@ def _make_provider() -> FundingRateProvider:
             if not price:
                 print(f"  {Fore.RED}[MOCK] No mark price for {ex} {sym} — entry skipped{Style.RESET_ALL}")
                 continue
+            next_ts_ms = None
+            if "funding_time" in entry:
+                try:
+                    next_ts_ms = _parse_funding_time(entry["funding_time"])
+                except ValueError as e:
+                    print(f"  {Fore.RED}{e}{Style.RESET_ALL}")
+                    continue
             mock.add(
-                exchange       = ex,
-                symbol         = sym,
-                rate_pct       = entry["rate_pct"],
-                mark_price     = price,
-                interval_hours = entry.get("interval_hours", 8.0),
+                exchange   = ex,
+                symbol     = sym,
+                rate_pct   = entry["rate_pct"],
+                mark_price = price,
+                next_ts_ms = next_ts_ms,  # None → MockFundingProvider auto-computes
             )
         return mock
     return LiveFundingProvider(_ACTIVE_FETCHERS)

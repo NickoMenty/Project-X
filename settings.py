@@ -25,14 +25,15 @@ DRY_RUN: bool = True
 #   exchange        Exchange name, must match ENABLED_EXCHANGES
 #   symbol          Normalised base asset, e.g. "BTC"
 #   rate_pct        Funding rate as a percentage, e.g. 0.05 means +0.05%
+#   funding_time    (optional) Next funding epoch in UTC — "HH:MM:SS" or
+#                   "HH:MM:SS.mmm" or "HH:MM:SS:mmm". Omit to auto-compute.
 #   mark_price      (optional) Mark price in USD — omit to use the live price
-#   interval_hours  (optional) funding interval in hours, default 8
 #
 # Tip: opposing rates on the same symbol across two exchanges will score as
 # an opportunity (one side collects, the other pays).
 MOCK_SCENARIO: list[dict] = [
-    {"exchange": "Binance", "symbol": "BTC", "rate_pct":  0.05, "interval_hours": 0.1},
-    {"exchange": "Bybit",   "symbol": "BTC", "rate_pct": -0.03, "interval_hours": 0.1},
+    {"exchange": "Binance", "symbol": "BTC", "rate_pct":  0.5, "funding_time": "20:00:00"},
+    {"exchange": "Bybit",   "symbol": "BTC", "rate_pct": -0.3, "funding_time": "20:00:00"},
 ]
 
 # ── Connectivity test ─────────────────────────────────────────────────────────

@@ -409,12 +409,10 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
                   else trade.position_size_usd)
 
     # ── Price P&L ──────────────────────────────────────────────────────────────
-    long_pnl_pct = ((actual_exit_long - trade.entry_long_price) / trade.entry_long_price * 100
-                    if trade.entry_long_price else 0)
-    short_pnl_pct = ((trade.entry_short_price - actual_exit_short) / trade.entry_short_price * 100
-                     if trade.entry_short_price else 0)
-    trade.long_price_pnl_usd  = long_size  * long_pnl_pct  / 100
-    trade.short_price_pnl_usd = short_size * short_pnl_pct / 100
+    long_qty  = trade.long_entry_result.qty  if trade.long_entry_result  else 0.0
+    short_qty = trade.short_entry_result.qty if trade.short_entry_result else 0.0
+    trade.long_price_pnl_usd  = long_qty  * (actual_exit_long  - trade.entry_long_price)
+    trade.short_price_pnl_usd = short_qty * (trade.entry_short_price - actual_exit_short)
 
     # ── Funding P&L ────────────────────────────────────────────────────────────
     short_funding = short_size * trade.short_rate_pct / 100
@@ -521,13 +519,10 @@ def reconcile_fills(trade: RealTrade) -> None:
     actual_exit_short = (trade.short_exit_result.fill_price
                          if trade.short_exit_result and trade.short_exit_result.success else 0)
 
-    long_pnl_pct = ((actual_exit_long - trade.entry_long_price) / trade.entry_long_price * 100
-                    if trade.entry_long_price else 0)
-    short_pnl_pct = ((trade.entry_short_price - actual_exit_short) / trade.entry_short_price * 100
-                     if trade.entry_short_price else 0)
-
-    trade.long_price_pnl_usd  = long_size  * long_pnl_pct  / 100
-    trade.short_price_pnl_usd = short_size * short_pnl_pct / 100
+    long_qty  = trade.long_entry_result.qty  if trade.long_entry_result  else 0.0
+    short_qty = trade.short_entry_result.qty if trade.short_entry_result else 0.0
+    trade.long_price_pnl_usd  = long_qty  * (actual_exit_long  - trade.entry_long_price)
+    trade.short_price_pnl_usd = short_qty * (trade.entry_short_price - actual_exit_short)
     trade.net_pnl_usd = (trade.long_price_pnl_usd + trade.short_price_pnl_usd
                          + trade.net_funding_usd - trade.total_fee_usd)
 
@@ -588,9 +583,10 @@ def reconcile_funding(trade: RealTrade) -> None:
         if short_actual is None and not trade.hedge_credits:
             short_contrib = 0.0
 
-    trade.net_funding_usd       = long_contrib + short_contrib
-    trade.funding_collected_usd = max(0.0, long_contrib) + max(0.0, short_contrib)
-    trade.funding_paid_usd      = min(0.0, long_contrib) + min(0.0, short_contrib)
+    # Keep per-leg semantics: collected = short leg, paid = long leg (matches _finalize)
+    trade.funding_collected_usd = short_contrib
+    trade.funding_paid_usd      = long_contrib
+    trade.net_funding_usd       = short_contrib + long_contrib
     trade.net_pnl_usd = (trade.long_price_pnl_usd + trade.short_price_pnl_usd
                          + trade.net_funding_usd - trade.total_fee_usd)
 

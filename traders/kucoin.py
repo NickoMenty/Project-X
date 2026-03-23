@@ -132,10 +132,7 @@ class KuCoinTrader(BaseTrader):
         kc_sym = self._kc_symbol(symbol)
         lots = close_lots if close_lots else self._lots(symbol, notional_usd, mark_price)
 
-        # Respect KuCoin's per-symbol max leverage to avoid silent caps
-        actual_leverage = leverage if reduce_only else min(leverage, self._get_max_leverage(kc_sym))
-        if actual_leverage < leverage:
-            print(f"  [KuCoin] {kc_sym}: max leverage is {actual_leverage}x (requested {leverage}x)")
+        actual_leverage = leverage
 
         payload: dict = {
             "clientOid":  str(uuid.uuid4()),

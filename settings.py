@@ -17,7 +17,12 @@ When an exchange is disabled it is excluded from:
 # ── Connectivity test ─────────────────────────────────────────────────────────
 # Set to False to skip the ETH round-trip order test on every startup.
 # Useful once all exchanges are confirmed working.
-RUN_CONNECTIVITY_TEST: bool = True
+RUN_CONNECTIVITY_TEST: bool = False
+
+# ── Trade timing ──────────────────────────────────────────────────────────────
+# Seconds to wait after the funding epoch fires before closing both positions.
+# 1s gives the funding payment time to register while keeping exposure minimal.
+EXIT_WAIT_SECONDS: int = 1
 
 ENABLED_EXCHANGES: dict[str, bool] = {
     "Binance":     True,
@@ -25,7 +30,7 @@ ENABLED_EXCHANGES: dict[str, bool] = {
     "Bitget":      True,
     "Hyperliquid": True,
     "AsterDex":    True,
-    "OKX":         True,
+    "OKX":         False,
     "KuCoin":      True,
 }
 

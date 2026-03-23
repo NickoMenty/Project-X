@@ -41,6 +41,7 @@ class KuCoinTrader(BaseTrader):
             hmac.new(api_secret.encode(), passphrase.encode(), hashlib.sha256).digest()
         ).decode()
         self._lot_cache: Dict[str, float] = {}
+        self._max_lev_cache: Dict[str, int] = {}
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -96,10 +97,17 @@ class KuCoinTrader(BaseTrader):
             data = self._get(f"/api/v1/contracts/{kc_sym}")
             mult = float(data.get("multiplier", 1) or 1)
             self._lot_cache[kc_sym] = mult
+            self._max_lev_cache[kc_sym] = int(data.get("maxLeverage", 100) or 100)
             return mult
         except Exception:
             self._lot_cache[kc_sym] = 1.0
+            self._max_lev_cache[kc_sym] = 100
             return 1.0
+
+    def _get_max_leverage(self, kc_sym: str) -> int:
+        if kc_sym not in self._max_lev_cache:
+            self._load_lot_size(kc_sym)
+        return self._max_lev_cache.get(kc_sym, 100)
 
     def _lots(self, symbol: str, notional_usd: float, mark_price: float) -> int:
         kc_sym = self._kc_symbol(symbol)
@@ -124,12 +132,17 @@ class KuCoinTrader(BaseTrader):
         kc_sym = self._kc_symbol(symbol)
         lots = close_lots if close_lots else self._lots(symbol, notional_usd, mark_price)
 
+        # Respect KuCoin's per-symbol max leverage to avoid silent caps
+        actual_leverage = leverage if reduce_only else min(leverage, self._get_max_leverage(kc_sym))
+        if actual_leverage < leverage:
+            print(f"  [KuCoin] {kc_sym}: max leverage is {actual_leverage}x (requested {leverage}x)")
+
         payload: dict = {
             "clientOid":  str(uuid.uuid4()),
             "symbol":     kc_sym,
             "side":       side,
             "type":       "market",
-            "leverage":   str(leverage),
+            "leverage":   str(actual_leverage),
             "size":       lots,
             "marginMode": "CROSS",
         }
@@ -152,7 +165,7 @@ class KuCoinTrader(BaseTrader):
                 if scale < 1.0:
                     print(f"  [KuCoin] placed at {int(scale*100)}% size ({scaled_lots} lots) after margin retry")
                 return TradeResult(self.exchange_name, symbol, kc_sym, side,
-                                   qty, mark_price, qty * mark_price, leverage, order_id=str(oid))
+                                   qty, mark_price, qty * mark_price, actual_leverage, order_id=str(oid))
             except RuntimeError as e:
                 last_err = str(e)
                 if "330008" not in last_err or reduce_only:

@@ -42,7 +42,8 @@ class HyperliquidTrader(BaseTrader):
 
     def __init__(self, private_key: str):
         Account = _load_eth_account()
-        if not private_key.startswith("0x"):
+        private_key = private_key.strip().strip('"').strip("'")
+        if not private_key.lower().startswith("0x"):
             private_key = "0x" + private_key
         self._account = Account.from_key(private_key)
         self.api_wallet_address = self._account.address

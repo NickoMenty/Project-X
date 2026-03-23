@@ -31,6 +31,7 @@ from colorama import init, Fore, Style
 
 from exchanges.base import FundingData
 from exchanges import bybit, binance, hyperliquid, asterdex, bitget, okx, kucoin
+from exchanges.provider import FundingRateProvider, LiveFundingProvider, MockFundingProvider
 from settings import active_exchanges, RUN_CONNECTIVITY_TEST
 from price_normalizer import normalize_prices
 from pair_engine import build_pair_records, summarize_intersection, PairRecord
@@ -60,32 +61,20 @@ _ALL_FETCHERS = {
     "KuCoin":      kucoin.fetch_funding_rates,
 }
 
-EXCHANGE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchanges()}
-ALL_EXCHANGES = list(EXCHANGE_FETCHERS.keys())
+_ACTIVE_FETCHERS = {k: v for k, v in _ALL_FETCHERS.items() if k in active_exchanges()}
+ALL_EXCHANGES = list(_ACTIVE_FETCHERS.keys())
 
 
-# ─────────────────────────────────────────────
-#  Step 1 — Concurrent fetch
-# ─────────────────────────────────────────────
+def _make_provider() -> FundingRateProvider:
+    """
+    Return the appropriate funding rate provider for this session.
 
-def fetch_all() -> Dict[str, List[FundingData]]:
-    """Fetch funding rates from all 7 exchanges in parallel."""
-    results = {}
-
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        futures = {executor.submit(fn): name for name, fn in EXCHANGE_FETCHERS.items()}
-        for future in as_completed(futures):
-            name = futures[future]
-            try:
-                data = future.result(timeout=15)
-                results[name] = data
-                status = Fore.GREEN + f"✓ {len(data)} pairs" + Style.RESET_ALL
-            except Exception as e:
-                results[name] = []
-                status = Fore.RED + f"✗ {e}" + Style.RESET_ALL
-            print(f"  {name:14s} {status}")
-
-    return results
+    DRY_RUN=true  →  MockFundingProvider (no live API calls; configure rates in code)
+    DRY_RUN=false →  LiveFundingProvider (parallel HTTP fetch from all active exchanges)
+    """
+    if DRY_RUN:
+        return MockFundingProvider()
+    return LiveFundingProvider(_ACTIVE_FETCHERS)
 
 
 # ─────────────────────────────────────────────
@@ -432,13 +421,25 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
     export_info = None
     last_scanned_event: Optional[int] = None  # avoid double-scanning same epoch
 
+    # ── Choose funding rate provider ──────────────────────────────────────────
+    provider = _make_provider()
+    if DRY_RUN:
+        print(
+            Fore.YELLOW + Style.BRIGHT +
+            "\n  ── MOCK RATES MODE (DRY_RUN) ──\n"
+            "  Live funding rates replaced with MockFundingProvider.\n"
+            "  Configure mock entries in _make_provider() or pass a provider to run().\n"
+            "  Orders ARE real — all trades execute on exchange.\n"
+            + Style.RESET_ALL
+        )
+
     # ── Startup: connectivity + trader init ───────────────────────────────────
     startup_data = _startup_check()
 
     print(Style.BRIGHT + "\n  ── INITIALISING EXCHANGE TRADERS ──\n" + Style.RESET_ALL)
     init_traders()
 
-    if not DRY_RUN and RUN_CONNECTIVITY_TEST:
+    if RUN_CONNECTIVITY_TEST:
         from real_trader import TEST_ORDER_NOTIONAL, TEST_ORDER_SYMBOL
         test_desc = f"${TEST_ORDER_NOTIONAL:.0f} {TEST_ORDER_SYMBOL} long → close"
         print(Style.BRIGHT + f"\n  ── ORDER CONNECTIVITY TEST ({test_desc}) ──\n" + Style.RESET_ALL)
@@ -471,7 +472,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
 
     send_alert(
         "▶️ Started — monitoring funding rates\n"
-        + ("🔒 DRY-RUN mode (no real orders)\n" if DRY_RUN else "💰 LIVE trading active\n")
+        + ("🧪 MOCK RATES mode (mock funding data, real orders)\n" if DRY_RUN else "💰 LIVE trading active\n")
         + "\n".join(_bal_line(ex, balances.get(ex)) for ex in active_exchanges())
     )
 
@@ -480,7 +481,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
         print(Style.BRIGHT + "\n  Fetching funding rates...\n" + Style.RESET_ALL)
 
         all_data, records, _, elapsed, export_info = _fetch_and_build(
-            min_exchanges, no_export, export_info
+            min_exchanges, no_export, export_info, provider
         )
 
         display_summary(all_data, records, elapsed, export_info)
@@ -523,7 +524,7 @@ def run(interval: int, once: bool, min_exchanges: int, no_export: bool, no_score
                 time.sleep(sleep_s)
 
             try:
-                _run_pre_epoch_scan(next_event, min_exchanges, no_export, export_info)
+                _run_pre_epoch_scan(next_event, min_exchanges, no_export, export_info, provider)
             except Exception as e:
                 import traceback
                 err = traceback.format_exc()
@@ -553,13 +554,14 @@ def _fetch_and_build(
     min_exchanges: int,
     no_export: bool,
     export_info: Optional[dict],
+    provider: FundingRateProvider,
 ) -> Tuple[dict, dict, dict, float, Optional[dict]]:
     """
     Run one full fetch → normalise → build cycle.
     Returns (all_data, records, price_views, elapsed, export_info).
     """
     t0 = time.time()
-    all_data = fetch_all()
+    all_data = provider.fetch_all()
     elapsed = time.time() - t0
 
     pair_table_raw: dict = defaultdict(dict)
@@ -619,6 +621,7 @@ def _run_pre_epoch_scan(
     min_exchanges: int,
     no_export: bool,
     export_info: Optional[dict],
+    provider: FundingRateProvider,
 ) -> None:
     """
     Full Milestone 3 execution sequence triggered 60s before a joint funding event:
@@ -639,7 +642,7 @@ def _run_pre_epoch_scan(
         + Style.RESET_ALL
     )
 
-    _, records, _, elapsed, _ = _fetch_and_build(min_exchanges, no_export, export_info)
+    _, records, _, elapsed, _ = _fetch_and_build(min_exchanges, no_export, export_info, provider)
     passing, failing = score_all_spikes(records)
 
     secs_to = max(0.0, (event_ts_ms - time.time() * 1000) / 1000)
@@ -709,7 +712,7 @@ def _run_pre_epoch_scan(
     secs_to = max(0.0, (event_ts_ms - time.time() * 1000) / 1000)
     ts_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
     print()
-    mode_tag = "[DRY-RUN]" if DRY_RUN else "[LIVE]"
+    mode_tag = "[MOCK RATES]" if DRY_RUN else "[LIVE]"
     print(Fore.GREEN + Style.BRIGHT + "─" * 110 + Style.RESET_ALL)
     print(
         Fore.GREEN + Style.BRIGHT +
@@ -744,7 +747,7 @@ def _run_pre_epoch_scan(
         f"  {mode_tag} EXIT FETCH  |  {ts_str}  |  fetching exit prices..."
         + Style.RESET_ALL
     )
-    exit_all_data, _, _, _, _ = _fetch_and_build(min_exchanges, no_export=True, export_info=None)
+    exit_all_data, _, _, _, _ = _fetch_and_build(min_exchanges, no_export=True, export_info=None, provider=provider)
 
     # Extract mark prices for the two relevant exchanges
     exit_long_price  = _extract_price(exit_all_data, best.symbol, best.long_exchange,  best.long_price)

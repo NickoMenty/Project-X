@@ -207,10 +207,7 @@ def fetch_all_balances() -> Dict[str, object]:
 
     def _fetch(name, trader):
         try:
-            if DRY_RUN:
-                balances[name] = 100.0
-            else:
-                balances[name] = trader.get_balance()
+            balances[name] = trader.get_balance()
         except Exception as e:
             errors[name] = str(e)
             balances[name] = None
@@ -287,24 +284,9 @@ def real_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> RealTrade:
     trade.leverage_used = leverage_used
 
     if DRY_RUN:
-        if not opportunity.long_price or not opportunity.short_price:
-            trade.error = f"Cannot enter: missing price (long={opportunity.long_price}, short={opportunity.short_price})"
-            return trade
-        print(f"  [DRY-RUN] Would open LONG  {opportunity.long_exchange}  {opportunity.symbol}"
-              f"  ${POSITION_SIZE_USD} @ {lev_long}x  price≈{opportunity.long_price:.4f}")
-        print(f"  [DRY-RUN] Would open SHORT {opportunity.short_exchange}  {opportunity.symbol}"
-              f"  ${POSITION_SIZE_USD} @ {lev_short}x  price≈{opportunity.short_price:.4f}")
-        # Fake results for dry-run
-        from traders.base import TradeResult as TR
-        trade.long_entry_result = TR(opportunity.long_exchange, opportunity.symbol,
-                                     opportunity.symbol + "USDT", "buy",
-                                     POSITION_SIZE_USD / opportunity.long_price,
-                                     opportunity.long_price, POSITION_SIZE_USD, lev_long)
-        trade.short_entry_result = TR(opportunity.short_exchange, opportunity.symbol,
-                                      opportunity.symbol + "USDT", "sell",
-                                      POSITION_SIZE_USD / opportunity.short_price,
-                                      opportunity.short_price, POSITION_SIZE_USD, lev_short)
-        return trade
+        print(
+            f"  {Fore.YELLOW}[MOCK RATES] Entering trade driven by mock funding data{Style.RESET_ALL}"
+        )
 
     from traders.base import TradeResult as TR
 
@@ -374,39 +356,33 @@ def real_exit(trade: RealTrade, exit_long_price: float, exit_short_price: float)
     long_exit: Optional[TradeResult] = None
     short_exit: Optional[TradeResult] = None
 
+    from traders.base import TradeResult as TR
+
     if DRY_RUN:
-        print(f"  [DRY-RUN] Would close LONG  {trade.long_exchange}  {trade.symbol}"
-              f"  qty={trade.long_qty:.4f}  price≈{exit_long_price:.4f}")
-        print(f"  [DRY-RUN] Would close SHORT {trade.short_exchange}  {trade.symbol}"
-              f"  qty={trade.short_qty:.4f}  price≈{exit_short_price:.4f}")
-        from traders.base import TradeResult as TR
-        long_exit = TR(trade.long_exchange, trade.symbol, trade.symbol + "USDT", "sell",
-                       trade.long_qty, exit_long_price, trade.long_qty * exit_long_price, 1)
-        short_exit = TR(trade.short_exchange, trade.symbol, trade.symbol + "USDT", "buy",
-                        trade.short_qty, exit_short_price, trade.short_qty * exit_short_price, 1)
-    else:
-        from traders.base import TradeResult as TR
+        print(
+            f"  {Fore.YELLOW}[MOCK RATES] Closing trade driven by mock funding data{Style.RESET_ALL}"
+        )
 
-        def _close_long():
-            nonlocal long_exit
-            try:
-                long_exit = long_trader.close_long(trade.symbol, trade.long_qty)
-            except Exception as e:
-                long_exit = TR(trade.long_exchange, trade.symbol,
-                               trade.symbol + "USDT", "sell", 0, 0, 0, 1, error=str(e))
+    def _close_long():
+        nonlocal long_exit
+        try:
+            long_exit = long_trader.close_long(trade.symbol, trade.long_qty)
+        except Exception as e:
+            long_exit = TR(trade.long_exchange, trade.symbol,
+                           trade.symbol + "USDT", "sell", 0, 0, 0, 1, error=str(e))
 
-        def _close_short():
-            nonlocal short_exit
-            try:
-                short_exit = short_trader.close_short(trade.symbol, trade.short_qty)
-            except Exception as e:
-                short_exit = TR(trade.short_exchange, trade.symbol,
-                                trade.symbol + "USDT", "buy", 0, 0, 0, 1, error=str(e))
+    def _close_short():
+        nonlocal short_exit
+        try:
+            short_exit = short_trader.close_short(trade.symbol, trade.short_qty)
+        except Exception as e:
+            short_exit = TR(trade.short_exchange, trade.symbol,
+                            trade.symbol + "USDT", "buy", 0, 0, 0, 1, error=str(e))
 
-        t1 = threading.Thread(target=_close_long)
-        t2 = threading.Thread(target=_close_short)
-        t1.start(); t2.start()
-        t1.join(); t2.join()
+    t1 = threading.Thread(target=_close_long)
+    t2 = threading.Thread(target=_close_short)
+    t1.start(); t2.start()
+    t1.join(); t2.join()
 
     # Patch fill_price=0: exchange responses for market close orders are often async.
     # Use exit mark price (fetched at T+0) as the actual fill — it's the best available.
@@ -635,9 +611,6 @@ def run_order_connectivity_test(all_data: Dict[str, list]) -> Dict[str, Tuple[bo
     Only runs in LIVE mode — returns an empty dict when DRY_RUN is True.
     Returns {exchange: (success, message)}.
     """
-    if DRY_RUN:
-        return {}
-
     results: Dict[str, Tuple[bool, str]] = {}
 
     for name, trader in _traders.items():
@@ -698,7 +671,7 @@ def print_trade_report(trade: RealTrade) -> None:
     W = 72
     sep  = Style.BRIGHT + "─" * W + Style.RESET_ALL
     sep2 = Style.BRIGHT + "═" * W + Style.RESET_ALL
-    mode = "[DRY-RUN]" if DRY_RUN else "[LIVE]"
+    mode = "[MOCK RATES]" if DRY_RUN else "[LIVE]"
 
     print()
     print(sep2)

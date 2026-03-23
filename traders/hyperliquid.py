@@ -252,7 +252,10 @@ class HyperliquidTrader(BaseTrader):
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
         asset = self._asset_index(symbol)
-        for lev in [leverage, 5]:
+        candidates = sorted({leverage, 5, 3, 2, 1}, reverse=True)
+        for lev in candidates:
+            if lev > leverage:
+                continue
             try:
                 nonce = int(time.time() * 1000)
                 action = {
@@ -265,10 +268,14 @@ class HyperliquidTrader(BaseTrader):
                 payload = {"action": action, "nonce": nonce, "signature": sig, "vaultAddress": None}
                 resp = requests.post(EXCHANGE_URL, json=payload, timeout=10).json()
                 if resp.get("status") != "err":
+                    if lev < leverage:
+                        print(f"  [Hyperliquid] {symbol}: max leverage is {lev}x (requested {leverage}x)")
                     return lev
-            except Exception:
+                print(f"  [Hyperliquid] set_leverage {lev}x for {symbol} failed: {resp.get('response')}")
+            except Exception as e:
+                print(f"  [Hyperliquid] set_leverage {lev}x for {symbol} exception: {e}")
                 continue
-        return 5
+        return 1
 
     def _place(self, symbol: str, is_buy: bool, notional_usd: float,
                mark_price: float, leverage: int, reduce_only: bool = False,

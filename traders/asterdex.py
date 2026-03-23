@@ -177,14 +177,21 @@ class AsterDexTrader(BaseTrader):
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
         raw = self.fmt_symbol(symbol)
-        for lev in [leverage, 5]:
+        # Try requested leverage then common fallbacks down to 1x.
+        # Ensures we always find the highest supported leverage for the symbol.
+        candidates = sorted({leverage, 5, 3, 2, 1}, reverse=True)
+        for lev in candidates:
+            if lev > leverage:
+                continue
             try:
                 self._req("POST", "/fapi/v3/leverage", {"symbol": raw, "leverage": lev})
+                if lev < leverage:
+                    print(f"  [AsterDex] {raw}: max leverage is {lev}x (requested {leverage}x)")
                 return lev
             except RuntimeError as e:
                 msg = str(e)
                 if "-4028" in msg or "-4055" in msg:
-                    return lev
+                    return lev  # already set to this leverage
                 continue
         raise RuntimeError(f"AsterDex: could not set leverage for {raw}")
 

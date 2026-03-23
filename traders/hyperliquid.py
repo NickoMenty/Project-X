@@ -148,42 +148,32 @@ class HyperliquidTrader(BaseTrader):
             raise ImportError("msgpack is required for Hyperliquid. Install: pip install msgpack")
 
         from eth_hash.auto import keccak
-        from eth_account.messages import encode_typed_data
 
-        # 1. connection_id
+        # 1. connection_id = keccak256(msgpack(action) || uint64_be(nonce) || 0x00)
         raw = _msgpack.packb(action, use_bin_type=True)
         raw += nonce.to_bytes(8, "big")
         raw += b"\x00"  # no vault address
         connection_id = keccak(raw)  # bytes32
 
-        # 2. EIP-712 typed data sign (correct — no double-wrapping)
-        full_message = {
-            "domain": {
+        # 2. EIP-712 sign using sign_typed_data (eth_account >= 0.9)
+        signed = self._account.sign_typed_data(
+            domain_data={
                 "name": "Exchange",
                 "version": "1",
                 "chainId": 1337,
                 "verifyingContract": "0x0000000000000000000000000000000000000000",
             },
-            "types": {
-                "EIP712Domain": [
-                    {"name": "name", "type": "string"},
-                    {"name": "version", "type": "string"},
-                    {"name": "chainId", "type": "uint256"},
-                    {"name": "verifyingContract", "type": "address"},
-                ],
+            message_types={
                 "Agent": [
                     {"name": "source", "type": "string"},
                     {"name": "connectionId", "type": "bytes32"},
                 ],
             },
-            "primaryType": "Agent",
-            "message": {
+            message_data={
                 "source": "a",
                 "connectionId": connection_id,
             },
-        }
-        signable = encode_typed_data(full_message=full_message)
-        signed = self._account.sign_message(signable)
+        )
 
         return {"r": hex(signed.r), "s": hex(signed.s), "v": signed.v}
 

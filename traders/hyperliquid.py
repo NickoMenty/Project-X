@@ -155,8 +155,10 @@ class HyperliquidTrader(BaseTrader):
         raw += b"\x00"  # no vault address
         connection_id = keccak(raw)  # bytes32
 
-        # 2. EIP-712 sign using sign_typed_data (eth_account >= 0.9)
-        signed = self._account.sign_typed_data(
+        # 2. EIP-712 sign — use Account class method (sign_typed_data is not on LocalAccount)
+        from eth_account import Account as _Account
+        signed = _Account.sign_typed_data(
+            self._account.key,
             domain_data={
                 "name": "Exchange",
                 "version": "1",

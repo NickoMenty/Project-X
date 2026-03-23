@@ -789,6 +789,10 @@ def _run_pre_epoch_scan(
     )
 
     # ── T-10s: simulate entry ─────────────────────────────────────────────────
+    # Fetch pre-entry balances early (before the sleep) so the balance fetch
+    # latency does not eat into the 10s window before the funding epoch.
+    pre_bals = get_all_balances_dict()
+
     wait_to_entry = max(0.0, (event_ts_ms - 10_000 - time.time() * 1000) / 1000)
     if wait_to_entry > 0:
         print(f"\n  {Fore.CYAN}Waiting {wait_to_entry:.1f}s for entry window (T-10s)...{Style.RESET_ALL}")
@@ -808,7 +812,6 @@ def _run_pre_epoch_scan(
     )
     print(Fore.GREEN + Style.BRIGHT + "─" * 110 + Style.RESET_ALL)
 
-    pre_bals = get_all_balances_dict()
     trade = real_entry(best, event_ts_ms)
     trade.pre_balances = pre_bals
 

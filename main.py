@@ -423,8 +423,8 @@ def _startup_check() -> None:
     t0 = time.time()
     results = {}
     all_data: Dict[str, list] = {}
-    with ThreadPoolExecutor(max_workers=len(EXCHANGE_FETCHERS)) as executor:
-        futures = {executor.submit(fn): name for name, fn in EXCHANGE_FETCHERS.items()}
+    with ThreadPoolExecutor(max_workers=len(_ACTIVE_FETCHERS)) as executor:
+        futures = {executor.submit(fn): name for name, fn in _ACTIVE_FETCHERS.items()}
         for future in as_completed(futures):
             name = futures[future]
             try:

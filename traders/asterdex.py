@@ -212,7 +212,8 @@ class AsterDexTrader(BaseTrader):
         if reduce_only:
             params["reduceOnly"] = "true"
 
-        # -5018 = max notional limit reached. Retry with progressively smaller qty.
+        # -5018 = max notional limit; -4005 = qty > maxQty per order.
+        # Retry with progressively smaller qty for both.
         last_err: Optional[str] = None
         for scale in (1.0, 0.75, 0.5, 0.25):
             scaled_qty = self._round_qty(raw, qty * scale)
@@ -227,12 +228,12 @@ class AsterDexTrader(BaseTrader):
                 fill  = avg if avg > 0 else (price if price > 0 else mark_price)
                 oid   = str(resp.get("orderId", ""))
                 if scale < 1.0:
-                    print(f"  [AsterDex] placed at {int(scale*100)}% size ({scaled_qty}) after -5018 retry")
+                    print(f"  [AsterDex] placed at {int(scale*100)}% size ({scaled_qty}) after size retry")
                 return TradeResult(self.exchange_name, symbol, raw, side, scaled_qty, fill,
                                    scaled_qty * fill, leverage, order_id=oid)
             except RuntimeError as e:
                 last_err = str(e)
-                if "-5018" not in last_err or reduce_only:
+                if ("-5018" not in last_err and "-4005" not in last_err) or reduce_only:
                     raise
 
         raise RuntimeError(last_err or "AsterDex: all size retries exhausted")

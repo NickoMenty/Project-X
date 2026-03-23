@@ -455,7 +455,7 @@ def reconcile_fills(trade: RealTrade) -> None:
         return
 
     # Small pause so exchange history APIs catch up with the just-placed orders
-    time.sleep(3)
+    time.sleep(5)
 
     entry_since = int(trade.entry_ts * 1000) - 5_000
     entry_until = int(trade.entry_ts * 1000) + 30_000

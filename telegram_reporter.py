@@ -60,6 +60,16 @@ def _send(text: str) -> None:
             pass  # never crash the main loop over a Telegram failure
 
 
+def _fee_leg(entry_r, exit_r, size: float, fee_pct: float) -> str:
+    """Return fee string for one leg: actual if available, estimated otherwise."""
+    def _f(r):
+        return r.fee_usd if (r and r.fee_usd > 0) else size * fee_pct / 100
+    e = _f(entry_r)
+    c = _f(exit_r)
+    tag = "(actual)" if ((entry_r and entry_r.fee_usd > 0) or (exit_r and exit_r.fee_usd > 0)) else "(est.)"
+    return f"-${e + c:.4f} {tag}"
+
+
 def send_trade_report(trade: Any) -> None:
     """
     Format and send a completed SimulatedTrade report to Telegram.
@@ -101,8 +111,12 @@ def send_trade_report(trade: Any) -> None:
         f"  Short  {trade.short_exchange}  ${trade.entry_short_price:,.4f} → ${trade.exit_short_price:,.4f}  ({short_pct:+.4f}%)  ${trade.short_price_pnl_usd:+.4f}",
         "",
         f"<b>FEES</b>",
-        f"  Long  {trade.long_exchange}  {trade.long_fee_pct:.3f}% × 2  =  -${trade.position_size_usd * trade.long_fee_pct * 2 / 100:.4f}",
-        f"  Short {trade.short_exchange}  {trade.short_fee_pct:.3f}% × 2  =  -${trade.position_size_usd * trade.short_fee_pct * 2 / 100:.4f}",
+        f"  Long  {trade.long_exchange}  " + _fee_leg(
+            trade.long_entry_result, trade.long_exit_result,
+            trade.position_size_usd, trade.long_fee_pct),
+        f"  Short {trade.short_exchange}  " + _fee_leg(
+            trade.short_entry_result, trade.short_exit_result,
+            trade.position_size_usd, trade.short_fee_pct),
         f"  Total fees: -${trade.total_fee_usd:.4f}",
         "",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",

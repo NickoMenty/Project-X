@@ -32,8 +32,8 @@ DRY_RUN: bool = False
 # Tip: opposing rates on the same symbol across two exchanges will score as
 # an opportunity (one side collects, the other pays).
 MOCK_SCENARIO: list[dict] = [
-    {"exchange": "KuCoin", "symbol": "BTC", "rate_pct":  0.5, "funding_time": "13:41:00:00"},
-    {"exchange": "Hyperliquid",   "symbol": "BTC", "rate_pct": -0.3, "funding_time": "13:41:00:00"},
+    {"exchange": "Binance", "symbol": "WIF", "rate_pct":  0.5, "funding_time": "19:50:30:00"},
+    {"exchange": "Hyperliquid",   "symbol": "WIF", "rate_pct": -0.3, "funding_time": "16:20:00:00"},
 ]
 
 # ── Connectivity test ─────────────────────────────────────────────────────────
@@ -41,19 +41,28 @@ MOCK_SCENARIO: list[dict] = [
 # Useful once all exchanges are confirmed working.
 RUN_CONNECTIVITY_TEST: bool = False
 
+# ── Position sizing ───────────────────────────────────────────────────────────
+# USD notional per leg (each side of the trade).
+# Margin per leg = POSITION_SIZE_USD / TARGET_LEVERAGE
+POSITION_SIZE_USD: float = 100.0
+
+# Desired leverage. Each exchange falls back to its symbol maximum if this
+# exceeds what the symbol supports (e.g. 5x for WIF on Hyperliquid).
+TARGET_LEVERAGE: int = 10
+
 # ── Trade timing ──────────────────────────────────────────────────────────────
 # Seconds to wait after the funding epoch fires before closing both positions.
 # 1s gives the funding payment time to register while keeping exposure minimal.
-EXIT_WAIT_SECONDS: int = 1
+EXIT_WAIT_SECONDS: int = 2
 
 ENABLED_EXCHANGES: dict[str, bool] = {
-    "Binance":     True,
-    "Bybit":       True,
+    "Binance":     False,
+    "Bybit":       False,
     "Bitget":      True,
     "Hyperliquid": True,
-    "AsterDex":    True,
+    "AsterDex":    False,
     "OKX":         False,
-    "KuCoin":      True,
+    "KuCoin":      False,
 }
 
 # ── Helper ────────────────────────────────────────────────────────────────────

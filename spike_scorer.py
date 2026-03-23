@@ -47,8 +47,8 @@ from pair_engine import ExchangePair, PairRecord
 
 # ── Configurable constants ────────────────────────────────────────────────────
 
-# USD size of each leg — used for estimated P&L only, does not affect scoring
-POSITION_SIZE_USD: float = 500.0
+# USD size of each leg — configured in settings.py
+from settings import POSITION_SIZE_USD  # noqa: E402
 
 # Taker fee as % of notional, one-way, per exchange.
 # Round-trip per leg = 2×.  Total both legs = fee_A×2 + fee_B×2.

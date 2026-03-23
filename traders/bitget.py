@@ -223,14 +223,24 @@ class BitgetTrader(BaseTrader):
             if order_id:
                 params["orderId"] = order_id
             data = self._get("/api/v2/mix/order/fills", params)
-            items = data if isinstance(data, list) else (data.get("fills") or data.get("list") or [])
+            items = data if isinstance(data, list) else (data.get("fillList") or data.get("fills") or data.get("list") or [])
             if not items:
                 return None, None
+            def _px(x):
+                return float(x.get("fillPrice") or x.get("price") or 0)
+            def _fee(x):
+                # V2: feeDetail is a dict with totalFee; fallback to top-level fee
+                fd = x.get("feeDetail")
+                if isinstance(fd, dict):
+                    return abs(float(fd.get("totalFee") or 0))
+                if isinstance(fd, list) and fd:
+                    return abs(float(fd[0].get("totalFee") or 0))
+                return abs(float(x.get("fee") or 0))
             total_qty = sum(float(x.get("baseVolume", 0)) for x in items)
             if total_qty <= 0:
                 return None, None
-            avg_px = sum(float(x["price"]) * float(x["baseVolume"]) for x in items) / total_qty
-            total_fee = sum(abs(float(x.get("fee", 0))) for x in items)
+            avg_px = sum(_px(x) * float(x.get("baseVolume", 0)) for x in items) / total_qty
+            total_fee = sum(_fee(x) for x in items)
             return avg_px, total_fee
         except Exception:
             return None, None
@@ -244,7 +254,7 @@ class BitgetTrader(BaseTrader):
                 "startTime": str(since_ms), "endTime": str(until_ms),
                 "pageSize": "100",
             })
-            items = data.get("bills") if isinstance(data, dict) else (data or [])
+            items = (data.get("bills") or data.get("billList") or []) if isinstance(data, dict) else (data or [])
             if not items:
                 return None
             return sum(float(x.get("amount", 0)) for x in items)

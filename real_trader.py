@@ -28,11 +28,10 @@ from colorama import Fore, Style
 
 from spike_scorer import SpikeOpportunity, POSITION_SIZE_USD
 from traders.base import TradeResult
-from settings import EXIT_WAIT_SECONDS, DRY_RUN
+from settings import EXIT_WAIT_SECONDS, DRY_RUN, TARGET_LEVERAGE
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-TARGET_LEVERAGE = 10
 FALLBACK_LEVERAGE = 5
 
 # Set to True to log all actions but NOT place real orders (safe test mode)

@@ -24,7 +24,7 @@ import requests
 from dotenv import load_dotenv
 
 from spike_scorer import SpikeOpportunity, POSITION_SIZE_USD
-from real_trader import TARGET_LEVERAGE
+from settings import TARGET_LEVERAGE
 from typing import List, Any
 
 load_dotenv()

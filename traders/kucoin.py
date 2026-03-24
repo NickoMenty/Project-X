@@ -97,7 +97,9 @@ class KuCoinTrader(BaseTrader):
             data = self._get(f"/api/v1/contracts/{kc_sym}")
             mult = float(data.get("multiplier", 1) or 1)
             self._lot_cache[kc_sym] = mult
-            self._max_lev_cache[kc_sym] = int(data.get("maxLeverage", 100) or 100)
+            max_lev = int(data.get("maxLeverage", 100) or 100)
+            self._max_lev_cache[kc_sym] = max_lev
+            print(f"  [KuCoin] {kc_sym}: multiplier={mult}, maxLeverage={max_lev}")
             return mult
         except Exception:
             self._lot_cache[kc_sym] = 1.0
@@ -132,7 +134,9 @@ class KuCoinTrader(BaseTrader):
         kc_sym = self._kc_symbol(symbol)
         lots = close_lots if close_lots else self._lots(symbol, notional_usd, mark_price)
 
-        actual_leverage = leverage
+        actual_leverage = leverage if reduce_only else min(leverage, self._get_max_leverage(kc_sym))
+        if actual_leverage < leverage and not reduce_only:
+            print(f"  [KuCoin] {kc_sym}: capping leverage to {actual_leverage}x (requested {leverage}x, API maxLeverage={self._get_max_leverage(kc_sym)})")
 
         payload: dict = {
             "clientOid":  str(uuid.uuid4()),

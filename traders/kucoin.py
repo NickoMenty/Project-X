@@ -127,15 +127,6 @@ class KuCoinTrader(BaseTrader):
         kc_sym = self._kc_symbol(symbol)
         max_lev = self._get_max_leverage(kc_sym)
         actual = min(leverage, max_lev)
-        try:
-            self._post("/api/v2/position/changeLeverage", {
-                "symbol":     kc_sym,
-                "leverage":   str(actual),
-                "marginMode": "cross",
-            })
-        except RuntimeError as e:
-            # Non-fatal: log and proceed — leverage will still be sent per-order
-            print(f"  [KuCoin] set_leverage warning for {kc_sym}: {e}")
         if actual < leverage:
             print(f"  [KuCoin] {kc_sym}: max leverage is {actual}x (requested {leverage}x)")
         return actual
@@ -155,7 +146,7 @@ class KuCoinTrader(BaseTrader):
             "type":       "market",
             "leverage":   str(actual_leverage),
             "size":       lots,
-            "marginMode": "CROSS",
+            "marginMode": "isolated",
         }
         if reduce_only:
             payload["reduceOnly"] = True

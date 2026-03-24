@@ -127,6 +127,18 @@ class KuCoinTrader(BaseTrader):
         kc_sym = self._kc_symbol(symbol)
         max_lev = self._get_max_leverage(kc_sym)
         actual = min(leverage, max_lev)
+        # Switch to isolated margin so the per-order leverage field is respected.
+        # KuCoin rejects orders whose marginMode doesn't match the account setting.
+        try:
+            self._post("/api/v2/position/changeMarginMode", {
+                "symbol":     kc_sym,
+                "marginMode": "ISOLATED",
+            })
+        except RuntimeError as e:
+            msg = str(e)
+            # Already isolated or no open position required — both are fine
+            if "already" not in msg.lower() and "110021" not in msg:
+                print(f"  [KuCoin] changeMarginMode warning for {kc_sym}: {e}")
         if actual < leverage:
             print(f"  [KuCoin] {kc_sym}: max leverage is {actual}x (requested {leverage}x)")
         return actual

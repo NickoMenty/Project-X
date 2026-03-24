@@ -123,19 +123,21 @@ class KuCoinTrader(BaseTrader):
         data = self._get("/api/v1/account-overview", {"currency": "USDT"})
         return float(data.get("availableBalance", 0))
 
+    def _switch_margin_mode(self, kc_sym: str, mode: str):
+        """Try both v2 and v1 endpoint paths for changing margin mode."""
+        for path in ("/api/v2/position/changeMarginMode", "/api/v1/position/margin/mode"):
+            try:
+                self._post(path, {"symbol": kc_sym, "marginMode": mode})
+                print(f"  [KuCoin] {kc_sym}: margin mode → {mode} (via {path})")
+                return
+            except RuntimeError as e:
+                print(f"  [KuCoin] {kc_sym}: changeMarginMode {path} → {e}")
+
     def set_leverage(self, symbol: str, leverage: int) -> int:
         kc_sym = self._kc_symbol(symbol)
         max_lev = self._get_max_leverage(kc_sym)
         actual = min(leverage, max_lev)
-        # Switch to isolated margin so the per-order leverage field is respected.
-        # KuCoin rejects orders whose marginMode doesn't match the account setting.
-        try:
-            self._post("/api/v2/position/changeMarginMode", {
-                "symbol":     kc_sym,
-                "marginMode": "ISOLATED",
-            })
-        except RuntimeError as e:
-            print(f"  [KuCoin] changeMarginMode for {kc_sym}: {e}")
+        self._switch_margin_mode(kc_sym, "ISOLATED")
         if actual < leverage:
             print(f"  [KuCoin] {kc_sym}: max leverage is {actual}x (requested {leverage}x)")
         return actual
@@ -179,6 +181,11 @@ class KuCoinTrader(BaseTrader):
                                    qty, mark_price, qty * mark_price, actual_leverage, order_id=str(oid))
             except RuntimeError as e:
                 last_err = str(e)
+                if "400100" in last_err and not reduce_only:
+                    # Margin mode mismatch — force-switch and retry once
+                    print(f"  [KuCoin] 400100 margin mode mismatch on order, retrying after switch...")
+                    self._switch_margin_mode(kc_sym, "ISOLATED")
+                    continue
                 if "330008" not in last_err or reduce_only:
                     raise  # don't retry on other errors or close orders
 

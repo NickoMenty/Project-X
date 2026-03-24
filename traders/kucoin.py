@@ -124,9 +124,21 @@ class KuCoinTrader(BaseTrader):
         return float(data.get("availableBalance", 0))
 
     def set_leverage(self, symbol: str, leverage: int) -> int:
-        # KuCoin leverage is set per-order via the "leverage" field in the payload.
-        # There is no global set-leverage endpoint — return the requested value directly.
-        return leverage
+        kc_sym = self._kc_symbol(symbol)
+        max_lev = self._get_max_leverage(kc_sym)
+        actual = min(leverage, max_lev)
+        try:
+            self._post("/api/v2/position/changeLeverage", {
+                "symbol":     kc_sym,
+                "leverage":   str(actual),
+                "marginMode": "cross",
+            })
+        except RuntimeError as e:
+            # Non-fatal: log and proceed — leverage will still be sent per-order
+            print(f"  [KuCoin] set_leverage warning for {kc_sym}: {e}")
+        if actual < leverage:
+            print(f"  [KuCoin] {kc_sym}: max leverage is {actual}x (requested {leverage}x)")
+        return actual
 
     def _place(self, symbol: str, side: str, notional_usd: float,
                mark_price: float, leverage: int,
@@ -134,9 +146,7 @@ class KuCoinTrader(BaseTrader):
         kc_sym = self._kc_symbol(symbol)
         lots = close_lots if close_lots else self._lots(symbol, notional_usd, mark_price)
 
-        actual_leverage = leverage if reduce_only else min(leverage, self._get_max_leverage(kc_sym))
-        if actual_leverage < leverage and not reduce_only:
-            print(f"  [KuCoin] {kc_sym}: capping leverage to {actual_leverage}x (requested {leverage}x, API maxLeverage={self._get_max_leverage(kc_sym)})")
+        actual_leverage = leverage
 
         payload: dict = {
             "clientOid":  str(uuid.uuid4()),

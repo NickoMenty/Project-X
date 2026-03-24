@@ -135,10 +135,7 @@ class KuCoinTrader(BaseTrader):
                 "marginMode": "ISOLATED",
             })
         except RuntimeError as e:
-            msg = str(e)
-            # Already isolated or no open position required — both are fine
-            if "already" not in msg.lower() and "110021" not in msg:
-                print(f"  [KuCoin] changeMarginMode warning for {kc_sym}: {e}")
+            print(f"  [KuCoin] changeMarginMode for {kc_sym}: {e}")
         if actual < leverage:
             print(f"  [KuCoin] {kc_sym}: max leverage is {actual}x (requested {leverage}x)")
         return actual

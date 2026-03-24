@@ -921,4 +921,6 @@ def main():
 
 
 if __name__ == "__main__":
+    from logger import setup_logging
+    setup_logging()
     main()

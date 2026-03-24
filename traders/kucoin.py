@@ -157,7 +157,6 @@ class KuCoinTrader(BaseTrader):
             "type":       "market",
             "leverage":   str(actual_leverage),
             "size":       lots,
-            "marginMode": "isolated",
         }
         if reduce_only:
             payload["reduceOnly"] = True
@@ -181,11 +180,6 @@ class KuCoinTrader(BaseTrader):
                                    qty, mark_price, qty * mark_price, actual_leverage, order_id=str(oid))
             except RuntimeError as e:
                 last_err = str(e)
-                if "400100" in last_err and not reduce_only:
-                    # Margin mode mismatch — force-switch and retry once
-                    print(f"  [KuCoin] 400100 margin mode mismatch on order, retrying after switch...")
-                    self._switch_margin_mode(kc_sym, "ISOLATED")
-                    continue
                 if "330008" not in last_err or reduce_only:
                     raise  # don't retry on other errors or close orders
 

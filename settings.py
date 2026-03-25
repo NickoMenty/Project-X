@@ -18,7 +18,7 @@ When an exchange is disabled it is excluded from:
 # Set DRY_RUN = True to test the full pipeline with mock funding rates.
 # Orders ARE real in this mode — only the funding data is mocked.
 # Configure your test scenario in MOCK_SCENARIO below.
-DRY_RUN: bool = False
+DRY_RUN: bool = True
 
 # ── Mock scenario (used when DRY_RUN = True) ──────────────────────────────────
 # Each entry is a dict with these keys:
@@ -32,8 +32,8 @@ DRY_RUN: bool = False
 # Tip: opposing rates on the same symbol across two exchanges will score as
 # an opportunity (one side collects, the other pays).
 MOCK_SCENARIO: list[dict] = [
-    {"exchange": "Binance", "symbol": "WIF", "rate_pct":  0.5, "funding_time": "19:50:30:00"},
-    {"exchange": "Hyperliquid",   "symbol": "WIF", "rate_pct": -0.3, "funding_time": "16:20:00:00"},
+    {"exchange": "KuCoin", "symbol": "BTC", "rate_pct":  1.44, "funding_time": "16:12:30:00"},
+    {"exchange": "AsterDex",   "symbol": "BTC", "rate_pct": 0.005, "funding_time": "16:12:30:00"},
 ]
 
 # ── Connectivity test ─────────────────────────────────────────────────────────
@@ -50,19 +50,25 @@ POSITION_SIZE_USD: float = 100.0
 # exceeds what the symbol supports (e.g. 5x for WIF on Hyperliquid).
 TARGET_LEVERAGE: int = 10
 
+# ── Reverse mode ──────────────────────────────────────────────────────────────
+# When True, swap which exchange goes long vs short on every trade.
+# The scorer still picks the best opportunity as normal — this only flips
+# which leg is executed on which exchange at entry time.
+REVERSE: bool = False
+
 # ── Trade timing ──────────────────────────────────────────────────────────────
 # Seconds to wait after the funding epoch fires before closing both positions.
 # 1s gives the funding payment time to register while keeping exposure minimal.
 EXIT_WAIT_SECONDS: int = 2
 
 ENABLED_EXCHANGES: dict[str, bool] = {
-    "Binance":     False,
-    "Bybit":       False,
+    "Binance":     True,
+    "Bybit":       True,
     "Bitget":      True,
     "Hyperliquid": True,
-    "AsterDex":    False,
+    "AsterDex":    True,
     "OKX":         False,
-    "KuCoin":      False,
+    "KuCoin":      True,
 }
 
 # ── Helper ────────────────────────────────────────────────────────────────────

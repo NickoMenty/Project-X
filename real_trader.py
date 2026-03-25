@@ -28,7 +28,7 @@ from colorama import Fore, Style
 
 from spike_scorer import SpikeOpportunity, POSITION_SIZE_USD
 from traders.base import TradeResult
-from settings import EXIT_WAIT_SECONDS, DRY_RUN, TARGET_LEVERAGE
+from settings import EXIT_WAIT_SECONDS, DRY_RUN, TARGET_LEVERAGE, REVERSE
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -246,6 +246,22 @@ def real_entry(opportunity: SpikeOpportunity, event_ts_ms: int) -> RealTrade:
     Place real orders on both legs simultaneously.
     Returns a RealTrade record with entry fill prices.
     """
+    # REVERSE mode: swap which exchange goes long vs short.
+    # All downstream logic is unchanged — only the physical execution is flipped.
+    if REVERSE:
+        from dataclasses import replace as _dc_replace
+        opportunity = _dc_replace(
+            opportunity,
+            long_exchange=opportunity.short_exchange,
+            short_exchange=opportunity.long_exchange,
+            long_price=opportunity.short_price,
+            short_price=opportunity.long_price,
+            long_rate_pct=opportunity.short_rate_pct,
+            short_rate_pct=opportunity.long_rate_pct,
+            long_fee_pct=opportunity.short_fee_pct,
+            short_fee_pct=opportunity.long_fee_pct,
+        )
+
     trade = RealTrade(
         symbol=opportunity.symbol,
         long_exchange=opportunity.long_exchange,

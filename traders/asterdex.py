@@ -219,6 +219,11 @@ class AsterDexTrader(BaseTrader):
         if reduce_only:
             params["reduceOnly"] = "true"
 
+        # Leverage candidates to try on -2027 (leverage exceeds symbol max).
+        lev_candidates = sorted({leverage, 5, 3, 2, 1}, reverse=True)
+        lev_candidates = [l for l in lev_candidates if l <= leverage]
+        actual_leverage = leverage
+
         # -5018 = max notional limit; -4005 = qty > maxQty per order.
         # Retry with progressively smaller qty for both.
         last_err: Optional[str] = None
@@ -237,9 +242,21 @@ class AsterDexTrader(BaseTrader):
                 if scale < 1.0:
                     print(f"  [AsterDex] placed at {int(scale*100)}% size ({scaled_qty}) after size retry")
                 return TradeResult(self.exchange_name, symbol, raw, side, scaled_qty, fill,
-                                   scaled_qty * fill, leverage, order_id=oid)
+                                   scaled_qty * fill, actual_leverage, order_id=oid)
             except RuntimeError as e:
                 last_err = str(e)
+                if "-2027" in last_err and not reduce_only:
+                    # Leverage exceeds symbol max — step down and retry
+                    lev_candidates = [l for l in lev_candidates if l < actual_leverage]
+                    if not lev_candidates:
+                        raise
+                    actual_leverage = lev_candidates[0]
+                    try:
+                        self._req("POST", "/fapi/v3/leverage", {"symbol": raw, "leverage": actual_leverage})
+                        print(f"  [AsterDex] {raw}: -2027 on order — retrying with {actual_leverage}x leverage")
+                    except RuntimeError:
+                        pass
+                    continue
                 if ("-5018" not in last_err and "-4005" not in last_err) or reduce_only:
                     raise
 
